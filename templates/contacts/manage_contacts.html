@@ -1,0 +1,556 @@
+{% extends "base.html" %}
+
+{% block title %}Manage Contacts &mdash; {{ person.first_name }} {{ person.last_name }}{% endblock %}
+
+{% block extra_css %}
+<style>
+    /* Google Autocomplete dropdown layer */
+    .pac-container {
+        z-index: 99999 !important;
+        border-radius: 6px;
+        box-shadow: 0 8px 16px rgba(0, 0, 0, 0.15);
+        border: 1px solid #cbd5e1;
+    }
+    .contact-map-box {
+        height: 240px;
+        width: 100%;
+        background-color: #f1f5f9;
+        border-radius: 6px;
+        border: 1px solid #cbd5e1;
+    }
+    .custom-map-pin {
+        position: absolute;
+        width: 22px;
+        height: 22px;
+        background-color: #dc2626;
+        border: 2px solid #ffffff;
+        border-radius: 50% 50% 50% 0;
+        transform: translate(-50%, -100%) rotate(-45deg);
+        box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35);
+    }
+    .custom-map-pin::after {
+        content: '';
+        width: 6px;
+        height: 6px;
+        margin: 6px 0 0 6px;
+        background: #ffffff;
+        position: absolute;
+        border-radius: 50%;
+    }
+    .date-card-box {
+        background: #ffffff;
+        border: 1px solid #e2e8f0;
+        border-radius: 6px;
+        padding: 10px;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container py-4" style="max-width: 1020px;">
+    {% if messages %}
+        {% for m in messages %}
+            <div class="alert alert-{{ m.tags }} alert-dismissible fade show" role="alert">
+                {{ m }}
+                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+            </div>
+        {% endfor %}
+    {% endif %}
+
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <div>
+            <h3 class="mb-0 fw-bold">Contacts: {{ person.first_name }} {{ person.last_name }}</h3>
+            <span class="text-muted">Member ID: <code>{{ person.individual_id }}</code></span>
+        </div>
+        <div>
+            <a href="{% url 'media_mgmt:photo_upload' %}?individual_id={{ person.individual_id }}" class="btn btn-outline-primary btn-sm me-2">
+                <i class="bi bi-camera me-1"></i>Upload Photo
+            </a>
+            <a href="{% url 'genealogy:individual_tree' person.individual_id %}" class="btn btn-outline-secondary btn-sm">
+                <i class="bi bi-arrow-left me-1"></i>Back to Tree
+            </a>
+        </div>
+    </div>
+
+    <!-- 1. Physical Addresses Section -->
+    <div class="card shadow-sm mb-4">
+        <div class="card-header bg-white d-flex justify-content-between align-items-center py-3">
+            <h5 class="mb-0 fw-bold"><i class="bi bi-geo-alt-fill text-danger me-2"></i>Physical Addresses</h5>
+            <div>
+                <span class="badge bg-secondary me-2">Max 2 Active</span>
+                <button class="btn btn-sm btn-primary" type="button" data-bs-toggle="collapse" data-bs-target="#newAddressCollapse" aria-expanded="false" id="toggleAddAddressBtn">
+                    <i class="bi bi-plus-lg me-1"></i>Add Address
+                </button>
+            </div>
+        </div>
+        <div class="card-body">
+            <!-- Collapsible Address Form -->
+            <div class="collapse mb-4" id="newAddressCollapse">
+                <div class="card card-body bg-light border p-3">
+                    <h6 class="fw-bold text-primary mb-3">Add New Physical Address</h6>
+                    <form method="post" action="{% url 'contacts:add_address' person.individual_id %}" id="addAddressForm">
+                        {% csrf_token %}
+                        <div class="row g-3">
+                            <div class="col-12">
+                                <label class="form-label fw-semibold">Address / Location (Search place or click on map)</label>
+                                {{ address_form.location_text }}
+                                <div id="addr_input_map" class="contact-map-box mt-2"></div>
+                            </div>
+
+                            <div class="col-md-6">
+                                <label class="form-label text-muted small fw-semibold">Google Formatted Address</label>
+                                {{ address_form.formatted_address }}
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label text-muted small fw-semibold">Google Place ID</label>
+                                {{ address_form.place_id }}
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label text-muted small fw-semibold">Latitude</label>
+                                {{ address_form.lat }}
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label text-muted small fw-semibold">Longitude</label>
+                                {{ address_form.lng }}
+                            </div>
+
+                            <!-- Residing From Block -->
+                            <div class="col-md-6">
+                                <div class="date-card-box date-block-container" data-prefix="from_date">
+                                    <div class="fw-bold small text-secondary mb-2">RESIDING FROM DATE</div>
+                                    <div class="row g-1 align-items-end">
+                                        <div class="col-12">
+                                            <label class="form-label small fw-semibold mb-0">Precision</label>
+                                            {{ address_form.from_date_precision }}
+                                        </div>
+                                        <div class="col-12 mt-1 date-field-wrapper" id="from_date_start_wrapper">
+                                            <label class="form-label small fw-semibold mb-0 date-label" id="from_date_start_label">Date</label>
+                                            {{ address_form.from_date_start }}
+                                        </div>
+                                        <div class="col-12 mt-1 date-field-wrapper d-none" id="from_date_year_wrapper">
+                                            <label class="form-label small fw-semibold mb-0">Year</label>
+                                            {{ address_form.from_date_year_val }}
+                                        </div>
+                                        <div class="col-12 mt-1 date-field-wrapper d-none" id="from_date_month_wrapper">
+                                            <label class="form-label small fw-semibold mb-0">Year & Month</label>
+                                            {{ address_form.from_date_year_month }}
+                                        </div>
+                                        <div class="col-12 mt-1 date-field-wrapper d-none" id="from_date_end_wrapper">
+                                            <label class="form-label small fw-semibold mb-0 text-danger">End Date</label>
+                                            {{ address_form.from_date_end }}
+                                        </div>
+                                        <div class="col-12 mt-2">
+                                            <label class="form-label small fw-semibold mb-0">Formatted Date (Read-Only)</label>
+                                            {{ address_form.from_date_text }}
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Residing To Block -->
+                            <div class="col-md-6">
+                                <div class="date-card-box date-block-container" data-prefix="to_date">
+                                    <div class="fw-bold small text-secondary mb-2">RESIDING TO DATE</div>
+                                    <div class="row g-1 align-items-end">
+                                        <div class="col-12">
+                                            <label class="form-label small fw-semibold mb-0">Precision</label>
+                                            {{ address_form.to_date_precision }}
+                                        </div>
+                                        <div class="col-12 mt-1 date-field-wrapper" id="to_date_start_wrapper">
+                                            <label class="form-label small fw-semibold mb-0 date-label" id="to_date_start_label">Date</label>
+                                            {{ address_form.to_date_start }}
+                                        </div>
+                                        <div class="col-12 mt-1 date-field-wrapper d-none" id="to_date_year_wrapper">
+                                            <label class="form-label small fw-semibold mb-0">Year</label>
+                                            {{ address_form.to_date_year_val }}
+                                        </div>
+                                        <div class="col-12 mt-1 date-field-wrapper d-none" id="to_date_month_wrapper">
+                                            <label class="form-label small fw-semibold mb-0">Year & Month</label>
+                                            {{ address_form.to_date_year_month }}
+                                        </div>
+                                        <div class="col-12 mt-1 date-field-wrapper d-none" id="to_date_end_wrapper">
+                                            <label class="form-label small fw-semibold mb-0 text-danger">End Date</label>
+                                            {{ address_form.to_date_end }}
+                                        </div>
+                                        <div class="col-12 mt-2">
+                                            <label class="form-label small fw-semibold mb-0">Formatted Date (Read-Only)</label>
+                                            {{ address_form.to_date_text }}
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="col-md-6">
+                                <div class="form-check mt-2">
+                                    {{ address_form.is_primary }}
+                                    <label class="form-check-label fw-semibold">{{ address_form.is_primary.label }}</label>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="form-check mt-2">
+                                    {{ address_form.is_active }}
+                                    <label class="form-check-label fw-semibold">{{ address_form.is_active.label }}</label>
+                                </div>
+                            </div>
+
+                            <div class="col-12 pt-2 border-top d-flex gap-2">
+                                <button type="submit" class="btn btn-success px-4">Save Address</button>
+                                <button type="button" class="btn btn-outline-secondary" data-bs-toggle="collapse" data-bs-target="#newAddressCollapse">Cancel</button>
+                            </div>
+                        </div>
+                    </form>
+                </div>
+            </div>
+
+            <!-- Existing Address Records -->
+            <ul class="list-group">
+                {% for addr in addresses %}
+                    <li class="list-group-item d-flex justify-content-between align-items-center">
+                        <div>
+                            <h6 class="mb-0 fw-bold">{{ addr.location.original_location }}</h6>
+                            {% if addr.location.google_formatted_address %}
+                                <small class="text-muted d-block">{{ addr.location.google_formatted_address }}</small>
+                            {% endif %}
+                            <small class="text-secondary">
+                                Residency: {{ addr.from_date.original_text|default:"Start Unrecorded" }} &mdash; 
+                                {% if addr.to_date %}{{ addr.to_date.original_text }}{% else %}Present (Current Residence){% endif %}
+                            </small>
+                        </div>
+                        <div class="d-flex align-items-center">
+                            {% if addr.is_primary %}<span class="badge bg-primary me-2">Primary</span>{% endif %}
+                            <span class="badge {% if addr.is_active %}bg-success{% else %}bg-secondary{% endif %} me-3">
+                                {% if addr.is_active %}Active{% else %}Inactive{% endif %}
+                            </span>
+                            <a href="{% url 'contacts:edit_address' addr.individual_address_id %}" class="btn btn-outline-secondary btn-sm me-1">
+                                <i class="bi bi-pencil"></i> Edit
+                            </a>
+                            {% if addr.is_active and not addr.is_primary %}
+                                <a href="{% url 'contacts:make_primary_address' addr.individual_address_id %}" class="btn btn-outline-success btn-sm">
+                                    Set Primary
+                                </a>
+                            {% endif %}
+                        </div>
+                    </li>
+                {% empty %}
+                    <li class="list-group-item text-muted py-3">No physical addresses on record. Click <strong>Add Address</strong> above to add one.</li>
+                {% endfor %}
+            </ul>
+        </div>
+    </div>
+
+    <!-- 2. Phone Numbers & Email Addresses -->
+    <div class="row g-4">
+        <!-- Phones Card -->
+        <div class="col-md-6">
+            <div class="card shadow-sm h-100">
+                <div class="card-header bg-white d-flex justify-content-between align-items-center">
+                    <h5 class="mb-0 fw-bold"><i class="bi bi-telephone-fill text-primary me-2"></i>Phones (Max 3)</h5>
+                    <button class="btn btn-sm btn-outline-primary" data-bs-toggle="collapse" data-bs-target="#newPhoneCollapse">+</button>
+                </div>
+                <div class="card-body">
+                    <div class="collapse mb-3" id="newPhoneCollapse">
+                        <form method="post" action="{% url 'contacts:add_phone' person.individual_id %}">
+                            {% csrf_token %}
+                            <div class="mb-2">{{ phone_form.country_code }}</div>
+                            <div class="mb-2">{{ phone_form.phone_number }}</div>
+                            <div class="mb-2">{{ phone_form.phone_type }}</div>
+                            <div class="form-check mb-2">
+                                {{ phone_form.is_active }}
+                                <label class="form-check-label small">Active</label>
+                            </div>
+                            <button type="submit" class="btn btn-sm btn-primary w-100">Save Phone</button>
+                        </form>
+                    </div>
+                    <ul class="list-group">
+                        {% for phone in phones %}
+                            <li class="list-group-item d-flex justify-content-between align-items-center">
+                                <div>
+                                    <strong>{{ phone.country_code }} {{ phone.phone_number }}</strong>
+                                    <small class="text-muted d-block">{{ phone.get_phone_type_display }}</small>
+                                </div>
+                                <div class="d-flex align-items-center gap-1">
+                                    <span class="badge {% if phone.is_active %}bg-success{% else %}bg-secondary{% endif %} me-1">
+                                        {% if phone.is_active %}Active{% else %}Inactive{% endif %}
+                                    </span>
+                                    <a href="{% url 'contacts:edit_phone' phone.individual_phone_id %}" class="btn btn-outline-primary btn-sm">Edit</a>
+                                    <a href="{% url 'contacts:toggle_phone' phone.individual_phone_id %}" class="btn btn-outline-dark btn-sm">Toggle</a>
+                                </div>
+                            </li>
+                        {% empty %}
+                            <li class="list-group-item text-muted small">No phone numbers on file.</li>
+                        {% endfor %}
+                    </ul>
+                </div>
+            </div>
+        </div>
+
+        <!-- Emails Card -->
+        <div class="col-md-6">
+            <div class="card shadow-sm h-100">
+                <div class="card-header bg-white d-flex justify-content-between align-items-center">
+                    <h5 class="mb-0 fw-bold"><i class="bi bi-envelope-fill text-primary me-2"></i>Emails (Max 3)</h5>
+                    <button class="btn btn-sm btn-outline-primary" data-bs-toggle="collapse" data-bs-target="#newEmailCollapse">+</button>
+                </div>
+                <div class="card-body">
+                    <div class="collapse mb-3" id="newEmailCollapse">
+                        <form method="post" action="{% url 'contacts:add_email' person.individual_id %}">
+                            {% csrf_token %}
+                            <div class="mb-2">{{ email_form.email_address }}</div>
+                            <div class="form-check mb-2">
+                                {{ email_form.is_active }}
+                                <label class="form-check-label small">Active</label>
+                            </div>
+                            <button type="submit" class="btn btn-sm btn-primary w-100">Save Email</button>
+                        </form>
+                    </div>
+                    <ul class="list-group">
+                        {% for email in emails %}
+                            <li class="list-group-item d-flex justify-content-between align-items-center">
+                                <span class="text-truncate me-2" style="max-width: 200px;">{{ email.email_address }}</span>
+                                <div class="d-flex align-items-center gap-1">
+                                    <span class="badge {% if email.is_active %}bg-success{% else %}bg-secondary{% endif %} me-1">
+                                        {% if email.is_active %}Active{% else %}Inactive{% endif %}
+                                    </span>
+                                    <a href="{% url 'contacts:edit_email' email.individual_email_id %}" class="btn btn-outline-primary btn-sm">Edit</a>
+                                    <a href="{% url 'contacts:toggle_email' email.individual_email_id %}" class="btn btn-outline-dark btn-sm">Toggle</a>
+                                </div>
+                            </li>
+                        {% empty %}
+                            <li class="list-group-item text-muted small">No emails on file.</li>
+                        {% endfor %}
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+let addressMapInstance = null;
+let addressMarkerInstance = null;
+
+// Native Map Pin Overlay (avoids 'Loader.provide not called by module marker' crash)
+class AddressNativePinOverlay extends (window.google ? google.maps.OverlayView : Object) {
+    constructor(position, mapInst) {
+        super();
+        this.position = position;
+        this.div = null;
+        this.setMap(mapInst);
+    }
+    onAdd() {
+        this.div = document.createElement('div');
+        this.div.className = 'custom-map-pin';
+        this.getPanes().overlayMouseTarget.appendChild(this.div);
+    }
+    draw() {
+        const proj = this.getProjection();
+        if (!proj || !this.div) return;
+        const pt = proj.fromLatLngToDivPixel(this.position);
+        if (pt) {
+            this.div.style.left = pt.x + 'px';
+            this.div.style.top = pt.y + 'px';
+        }
+    }
+    setPosition(pos) {
+        this.position = pos;
+        this.draw();
+    }
+    onRemove() {
+        if (this.div) {
+            this.div.parentNode.removeChild(this.div);
+            this.div = null;
+        }
+    }
+}
+
+window.initAddressEntryMap = function() {
+    if (!window.google || !google.maps || !google.maps.places) return;
+
+    const input = document.getElementById('id_address_location');
+    const mapEl = document.getElementById('addr_input_map');
+    const idInput = document.getElementById('id_addr_place_id');
+    const addrInput = document.getElementById('id_addr_formatted_address');
+    const latInput = document.getElementById('id_addr_lat');
+    const lngInput = document.getElementById('id_addr_lng');
+
+    if (!input || !mapEl) return;
+
+    const geocoder = new google.maps.Geocoder();
+    
+    addressMapInstance = new google.maps.Map(mapEl, {
+        center: { lat: 20.0, lng: 0.0 },
+        zoom: 2,
+        mapTypeControl: false,
+        streetViewControl: false
+    });
+
+    function setLocationDetails(lat, lng, formattedAddress, placeId, originalName) {
+        if (input) input.value = originalName || formattedAddress || input.value;
+        if (idInput) idInput.value = placeId || '';
+        if (addrInput) addrInput.value = formattedAddress || '';
+        if (latInput) latInput.value = lat.toFixed(7);
+        if (lngInput) lngInput.value = lng.toFixed(7);
+
+        const pos = new google.maps.LatLng(lat, lng);
+        addressMapInstance.setCenter(pos);
+        addressMapInstance.setZoom(15);
+
+        if (!addressMarkerInstance) {
+            addressMarkerInstance = new AddressNativePinOverlay(pos, addressMapInstance);
+        } else {
+            addressMarkerInstance.setPosition(pos);
+        }
+    }
+
+    // 1. Places Autocomplete
+    input.addEventListener('keydown', e => { if (e.key === 'Enter') e.preventDefault(); });
+    const autocomplete = new google.maps.places.Autocomplete(input, {
+        fields: ['place_id', 'formatted_address', 'geometry', 'name']
+    });
+
+    autocomplete.addListener('place_changed', () => {
+        const place = autocomplete.getPlace();
+        if (!place || !place.geometry || !place.geometry.location) return;
+        const lat = place.geometry.location.lat();
+        const lng = place.geometry.location.lng();
+        setLocationDetails(lat, lng, place.formatted_address, place.place_id, place.name);
+    });
+
+    // 2. Direct Map Click Geocoding
+    addressMapInstance.addListener('click', (e) => {
+        const lat = e.latLng.lat();
+        const lng = e.latLng.lng();
+        geocoder.geocode({ location: { lat: lat, lng: lng } }, (results, status) => {
+            if (status === 'OK' && results[0]) {
+                setLocationDetails(lat, lng, results[0].formatted_address, results[0].place_id, results[0].formatted_address);
+            } else {
+                setLocationDetails(lat, lng, `Coordinates: ${lat.toFixed(5)}, ${lng.toFixed(5)}`, '', '');
+            }
+        });
+    });
+
+    // 3. Trigger map resize when Bootstrap Collapse opens
+    const collapseEl = document.getElementById('newAddressCollapse');
+    if (collapseEl) {
+        collapseEl.addEventListener('shown.bs.collapse', function () {
+            if (addressMapInstance) {
+                google.maps.event.trigger(addressMapInstance, 'resize');
+                const center = addressMarkerInstance ? addressMarkerInstance.position : addressMapInstance.getCenter();
+                addressMapInstance.setCenter(center);
+            }
+        });
+    }
+};
+
+(function loadGooglePlacesForContact() {
+    if (window.google && window.google.maps && window.google.maps.places) {
+        window.initAddressEntryMap();
+        return;
+    }
+
+    const apiKey = "{{ GOOGLE_MAPS_API_KEY|default:google_maps_api_key }}";
+    if (!apiKey) return;
+
+    if (!document.querySelector('script[src*="maps.googleapis.com"]')) {
+        const script = document.createElement('script');
+        script.src = `https://maps.googleapis.com/maps/api/js?key=${apiKey}&libraries=places&callback=initAddressEntryMap`;
+        script.async = true;
+        script.defer = true;
+        document.head.appendChild(script);
+    }
+})();
+
+// Dynamic Date Block Manager for Residing Dates
+document.addEventListener("DOMContentLoaded", function () {
+    const MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+    function formatDateDisplay(dateStr) {
+        if (!dateStr) return "";
+        const parts = dateStr.split("-");
+        if (parts.length !== 3) return dateStr;
+        const d = parseInt(parts[2], 10);
+        const m = parseInt(parts[1], 10) - 1;
+        const y = parts[0];
+        return `${String(d).padStart(2, '0')}-${MONTH_NAMES[m]}-${y}`;
+    }
+
+    function formatMonthYearDisplay(ymStr) {
+        if (!ymStr) return "";
+        const parts = ymStr.split("-");
+        if (parts.length !== 2) return ymStr;
+        const m = parseInt(parts[1], 10) - 1;
+        return `${MONTH_NAMES[m]}-${parts[0]}`;
+    }
+
+    document.querySelectorAll(".date-block-container").forEach(container => {
+        const prefix = container.getAttribute("data-prefix");
+        const precSelect = container.querySelector(".date-precision-select");
+        const startWrapper = document.getElementById(`${prefix}_start_wrapper`);
+        const startLabel = document.getElementById(`${prefix}_start_label`);
+        const startInput = container.querySelector(".date-start-input");
+        const endWrapper = document.getElementById(`${prefix}_end_wrapper`);
+        const endInput = container.querySelector(".date-end-input");
+        const yearWrapper = document.getElementById(`${prefix}_year_wrapper`);
+        const yearInput = container.querySelector(".date-year-input");
+        const monthWrapper = document.getElementById(`${prefix}_month_wrapper`);
+        const monthInput = container.querySelector(".date-month-input");
+        const textDisplay = container.querySelector(".date-display-text");
+
+        function updateDateUIAndText() {
+            if (!precSelect) return;
+            const prec = precSelect.value;
+
+            if (startWrapper) startWrapper.classList.add("d-none");
+            if (endWrapper) endWrapper.classList.add("d-none");
+            if (yearWrapper) yearWrapper.classList.add("d-none");
+            if (monthWrapper) monthWrapper.classList.add("d-none");
+
+            if (prec === "EXACT") {
+                if (startWrapper) startWrapper.classList.remove("d-none");
+                if (startLabel) startLabel.innerText = "Date";
+            } else if (prec === "YEAR") {
+                if (yearWrapper) yearWrapper.classList.remove("d-none");
+            } else if (prec === "YEAR_MONTH") {
+                if (monthWrapper) monthWrapper.classList.remove("d-none");
+            } else if (prec === "BEFORE" || prec === "AFTER") {
+                if (startWrapper) startWrapper.classList.remove("d-none");
+                if (startLabel) startLabel.innerText = "Reference Date";
+            } else if (prec === "BETWEEN") {
+                if (startWrapper) startWrapper.classList.remove("d-none");
+                if (endWrapper) endWrapper.classList.remove("d-none");
+                if (startLabel) startLabel.innerText = "Start Date";
+            }
+
+            let generated = "";
+            if (prec === "EXACT" && startInput && startInput.value) {
+                generated = formatDateDisplay(startInput.value);
+            } else if (prec === "YEAR" && yearInput && yearInput.value) {
+                generated = `Year ${yearInput.value}`;
+            } else if (prec === "YEAR_MONTH" && monthInput && monthInput.value) {
+                generated = formatMonthYearDisplay(monthInput.value);
+            } else if (prec === "BEFORE" && startInput && startInput.value) {
+                generated = `Before ${formatDateDisplay(startInput.value)}`;
+            } else if (prec === "AFTER" && startInput && startInput.value) {
+                generated = `After ${formatDateDisplay(startInput.value)}`;
+            } else if (prec === "BETWEEN") {
+                const s = startInput ? formatDateDisplay(startInput.value) : "?";
+                const e = endInput ? formatDateDisplay(endInput.value) : "?";
+                if ((startInput && startInput.value) || (endInput && endInput.value)) {
+                    generated = `Between ${s || '?'} and ${e || '?'}`;
+                }
+            }
+
+            if (textDisplay) textDisplay.value = generated;
+        }
+
+        if (precSelect) {
+            precSelect.addEventListener("change", updateDateUIAndText);
+            [startInput, endInput, yearInput, monthInput].forEach(inp => {
+                if (inp) inp.addEventListener("input", updateDateUIAndText);
+            });
+            updateDateUIAndText();
+        }
+    });
+});
+</script>
+{% endblock %}

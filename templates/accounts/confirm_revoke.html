@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Confirm Access Revocation</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+</head>
+<body class="bg-light py-5">
+<div class="container" style="max-width: 600px;">
+    <div class="card shadow-sm border-danger">
+        <div class="card-header bg-danger text-white">
+            <h5 class="mb-0">Revoke Access Grant</h5>
+        </div>
+        <div class="card-body">
+            <p>Are you sure you want to revoke <strong>{{ grant.access_type }}</strong> permission for user <strong>{{ grant.granted_to_user }}</strong>?</p>
+            <div class="alert alert-warning">
+                <strong>SRS Rule 25 Notice:</strong> Once revoked, this user will immediately lose access to all protected dates, locations, and contacts within this scope across all pages and APIs.
+            </div>
+
+            <form method="post">
+                {% csrf_token %}
+                <div class="d-flex justify-content-between pt-3 border-top">
+                    <button type="submit" class="btn btn-danger px-4">Confirm Revocation</button>
+                    <a href="{% url 'accounts:access_dashboard' %}" class="btn btn-outline-secondary">Cancel</a>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+</body>
+</html>

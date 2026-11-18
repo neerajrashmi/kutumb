@@ -1,0 +1,19 @@
+<!-- Profile Header: Public Information (SRS 8.1) -->
+<h3>{{ person.full_name }}</h3>
+<p>Gender: {{ person.gender_display }}</p>
+{% if person.photo_url %}
+    <img src="{{ person.photo_url }}" width="140" class="rounded">
+{% endif %}
+
+<!-- Protected Information Block (SRS 8.2 & 10) -->
+{% if person.can_view_protected %}
+    <div class="protected-info">
+        <p><strong>Birth:</strong> {{ person.birth_date|default:"Unrecorded" }} ({{ person.birth_location|default:"Unrecorded" }})</p>
+        <p><strong>Death:</strong> {{ person.death_date|default:"N/A" }} ({{ person.death_location|default:"N/A" }})</p>
+        <!-- Display Addresses, Phones, Emails -->
+    </div>
+{% else %}
+    <div class="alert alert-secondary">
+        <small class="text-muted">Personal dates, locations, and contact records are restricted by family privacy rules.</small>
+    </div>
+{% endif %}

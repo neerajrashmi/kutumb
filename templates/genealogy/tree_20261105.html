@@ -1,0 +1,937 @@
+{% extends "base.html" %}
+
+{% block title %}Extended Family Visualizer - {{ focus_person }}{% endblock %}
+
+{% block extra_css %}
+<style>
+    #tree-container {
+        width: 100%;
+        height: calc(100vh - 160px);
+        min-height: 580px;
+        background: #f8fafc;
+        border-radius: 10px;
+        border: 1px solid #cbd5e1;
+        position: relative;
+        overflow: hidden;
+    }
+    .node rect {
+        stroke-width: 1.5px;
+        transition: all 0.2s ease;
+        cursor: pointer;
+    }
+    .node text {
+        font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        font-size: 12px;
+        pointer-events: none;
+        user-select: none;
+    }
+    .node-male rect { fill: #eff6ff; stroke: #3b82f6; }
+    .node-female rect { fill: #fdf2f8; stroke: #ec4899; }
+    .node-other rect { fill: #f8fafc; stroke: #64748b; }
+    .node-root rect { stroke-width: 3.5px !important; stroke: #0d6efd !important; }
+    .node:hover rect { filter: drop-shadow(0 4px 10px rgba(0,0,0,0.18)); }
+
+    /* Strict 90-Degree Orthogonal Links */
+    .link { fill: none; stroke: #64748b; stroke-width: 2px; }
+    .link-sibling { fill: none; stroke: #64748b; stroke-width: 2px; }
+    .link-spouse { stroke: #e11d48; stroke-width: 2px; fill: none; }
+    
+    .tree-controls { position: absolute; top: 16px; right: 16px; z-index: 10; }
+    .tree-layout-toggle { position: absolute; top: 16px; left: 16px; z-index: 10; }
+    .privacy-tag { font-size: 11px; fill: #64748b; }
+
+    @media print {
+        body * { visibility: hidden; }
+        #tree-container, #tree-container * { visibility: visible; }
+        #tree-container {
+            position: absolute; left: 0; top: 0; width: 100% !important; height: 100% !important; border: none;
+        }
+        .tree-controls, .tree-layout-toggle, .btn-group, nav, header, footer { display: none !important; }
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-2">
+    <div>
+        <h4 class="fw-bold mb-0">
+            <i class="bi bi-diagram-3-fill text-primary me-2"></i>Interactive Family Visualizer
+        </h4>
+        <small class="text-muted">
+            Focus: <strong id="headerFocusName">{{ focus_person.first_name }} {{ focus_person.last_name }}</strong> 
+            (<code id="headerFocusId">{{ focus_person.individual_id }}</code>) &bull; 
+            <em>Dates in <code>DD-Mon-YYYY</code> &bull; Pure SVG</em>
+        </small>
+    </div>
+    <div class="btn-group">
+        <button id="btnCenterOnMe" class="btn btn-outline-secondary btn-sm">
+            <i class="bi bi-arrow-counterclockwise me-1"></i>Center on Me
+        </button>
+        <button id="btnPrintTree" class="btn btn-outline-dark btn-sm">
+            <i class="bi bi-printer me-1"></i>Print Tree
+        </button>
+        <a id="btnTopEditFocus" href="{% url 'genealogy:individual_edit' focus_person.individual_id %}" class="btn btn-outline-primary btn-sm">
+            <i class="bi bi-pencil me-1"></i>Edit Focus Member
+        </a>
+    </div>
+</div>
+
+<div id="tree-container">
+    <div class="tree-layout-toggle btn-group shadow-sm bg-white" role="group">
+        <input type="radio" class="btn-check" name="treeOrientation" id="orientHorizontal" value="H">
+        <label class="btn btn-outline-primary btn-sm" for="orientHorizontal"><i class="bi bi-arrows-expand me-1"></i>Horizontal</label>
+
+        <input type="radio" class="btn-check" name="treeOrientation" id="orientVertical" value="V" checked>
+        <label class="btn btn-outline-primary btn-sm" for="orientVertical"><i class="bi bi-arrow-down-up me-1"></i>Vertical</label>
+    </div>
+
+    <div class="tree-controls btn-group-vertical shadow-sm">
+        <button id="btn-zoom-in" class="btn btn-light btn-sm" title="Zoom In"><i class="bi bi-zoom-in"></i></button>
+        <button id="btn-zoom-out" class="btn btn-light btn-sm" title="Zoom Out"><i class="bi bi-zoom-out"></i></button>
+        <button id="btn-reset" class="btn btn-light btn-sm" title="Fit Entire Tree to Screen"><i class="bi bi-arrows-fullscreen"></i></button>
+    </div>
+
+    <svg id="tree-svg" width="100%" height="100%"></svg>
+</div>
+
+<!-- Slide-Out Member Detail Drawer -->
+<div class="offcanvas offcanvas-end" tabindex="-1" id="nodeDrawer" aria-labelledby="drawerName">
+    <div class="offcanvas-header bg-light border-bottom">
+        <h5 class="offcanvas-title fw-bold" id="drawerName">Member Details</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="offcanvas"></button>
+    </div>
+    <div class="offcanvas-body">
+        <div class="text-center mb-3">
+            <div id="drawerAvatarContainer" class="mb-2">
+                <div class="display-6 text-primary"><i class="bi bi-person-circle"></i></div>
+            </div>
+            <div class="badge bg-secondary" id="drawerId">ID</div>
+            <div class="badge bg-info text-dark" id="drawerGender">Gender</div>
+            <div class="badge bg-light text-dark border ms-1" id="drawerAccessBadge">Access</div>
+        </div>
+        <div class="list-group list-group-flush mb-3">
+            <div class="list-group-item px-0">
+                <span class="text-muted small d-block">Birth Date (DD-Mon-YYYY) & Place</span>
+                <span class="fw-semibold" id="drawerBirth">--</span>
+            </div>
+            <div class="list-group-item px-0">
+                <span class="text-muted small d-block">Death Date (DD-Mon-YYYY) & Place</span>
+                <span class="fw-semibold" id="drawerDeath">--</span>
+            </div>
+        </div>
+        <div class="d-grid gap-2 mt-4">
+            <button id="btnDrawerFocusNow" class="btn btn-primary btn-sm">
+                <i class="bi bi-diagram-2 me-1"></i>Set as Focus Node
+            </button>
+            <a id="btnDrawerEdit" href="#" class="btn btn-outline-secondary btn-sm">
+                <i class="bi bi-pencil me-1"></i>Edit Member Details
+            </a>
+            <div id="drawerEditDisabledBadge" class="alert alert-secondary py-1 text-center small mb-0 d-none">
+                <i class="bi bi-lock-fill me-1"></i>View Only (No Edit Rights)
+            </div>
+            <a id="btnDrawerContacts" href="#" class="btn btn-outline-secondary btn-sm">
+                <i class="bi bi-telephone me-1"></i>Manage Contacts
+            </a>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="https://d3js.org/d3.v7.min.js"></script>
+<script>
+document.addEventListener("DOMContentLoaded", function () {
+    let currentFocusId = "{{ focus_person.individual_id }}";
+    const userRootId = "{{ user.pk }}";
+    let currentOrientation = "V";
+
+    const drawerEl = document.getElementById('nodeDrawer');
+    let offcanvasInstance = null;
+    if (window.bootstrap && bootstrap.Offcanvas) {
+        offcanvasInstance = new bootstrap.Offcanvas(drawerEl);
+    }
+
+    const svg = d3.select("#tree-svg");
+    const container = document.getElementById("tree-container");
+    const g = svg.append("g");
+
+    const zoom = d3.zoom()
+        .scaleExtent([0.02, 3.5])
+        .on("zoom", (event) => g.attr("transform", event.transform));
+
+    svg.call(zoom);
+
+    // Standard Layout Constants
+    const cardWidth = 210;
+    const cardHeight = 95;
+    const genStepH = 372;
+    const genStepV = 204;
+    const slotGap = 28;
+
+    let clickTimer = null;
+
+    function path90(x1, y1, x2, y2, orientation = "V") {
+        if (orientation === "H") {
+            const midX = (x1 + x2) / 2;
+            return `M ${x1} ${y1} L ${midX} ${y1} L ${midX} ${y2} L ${x2} ${y2}`;
+        } else {
+            const midY = (y1 + y2) / 2;
+            return `M ${x1} ${y1} L ${x1} ${midY} L ${x2} ${midY} L ${x2} ${y2}`;
+        }
+    }
+
+    function renderCard(containerGroup, person, x, y, isFocus = false) {
+        const pId = person.individual_id || person.id;
+        const canEdit = !!person.can_edit;
+
+        const card = containerGroup.append("g")
+            .attr("class", `node node-${person.gender === 'M' ? 'male' : (person.gender === 'F' ? 'female' : 'other')} ${isFocus ? 'node-root' : ''}`)
+            .attr("transform", `translate(${x}, ${y})`)
+            .style("cursor", "pointer")
+            .on("click", (e) => {
+                e.stopPropagation();
+                if (clickTimer) clearTimeout(clickTimer);
+                clickTimer = setTimeout(() => { loadTree(pId); }, 220);
+            })
+            .on("dblclick", (e) => {
+                e.stopPropagation();
+                if (clickTimer) clearTimeout(clickTimer);
+                if (canEdit) {
+                    window.location.href = `/genealogy/individual/${pId}/edit/`;
+                } else {
+                    alert(`Read-Only Access: You do not possess Edit Rights on member ${person.name || pId}.`);
+                }
+            })
+            .on("contextmenu", (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                openDrawer(person);
+            });
+
+        card.append("rect")
+            .attr("width", cardWidth)
+            .attr("height", cardHeight)
+            .attr("rx", 6);
+
+        const clipId = `clip-${pId}-${Math.floor(Math.random() * 100000)}`;
+        card.append("clipPath")
+            .attr("id", clipId)
+            .append("circle")
+            .attr("cx", 30)
+            .attr("cy", 30)
+            .attr("r", 18);
+
+        if (person.photo_url) {
+            card.append("image")
+                .attr("x", 12)
+                .attr("y", 12)
+                .attr("width", 36)
+                .attr("height", 36)
+                .attr("href", person.photo_url)
+                .attr("xlink:href", person.photo_url)
+                .attr("clip-path", `url(#${clipId})`)
+                .attr("preserveAspectRatio", "xMidYMid slice");
+        } else {
+            card.append("circle")
+                .attr("cx", 30)
+                .attr("cy", 30)
+                .attr("r", 18)
+                .attr("fill", person.gender === 'M' ? '#bfdbfe' : (person.gender === 'F' ? '#fbcfe8' : '#e2e8f0'));
+
+            card.append("text")
+                .attr("x", 30)
+                .attr("y", 35)
+                .attr("text-anchor", "middle")
+                .attr("font-size", "14px")
+                .attr("fill", "#475569")
+                .text(person.gender === 'M' ? '♂' : (person.gender === 'F' ? '♀' : '?'));
+        }
+
+        const fullName = person.name || 
+            [person.first_name, person.middle_name, person.last_name].filter(Boolean).join(' ').trim() || 
+            pId;
+
+        card.append("text")
+            .attr("x", 58)
+            .attr("y", 24)
+            .attr("font-weight", "700")
+            .attr("font-size", "13px")
+            .attr("fill", "#0f172a")
+            .text(fullName.length > 17 ? fullName.substring(0, 16) + '…' : fullName);
+
+        card.append("text")
+            .attr("x", 58)
+            .attr("y", 39)
+            .attr("class", "privacy-tag")
+            .text(`${pId} (${person.gender || '?'}) ${canEdit ? '✎' : '🔒'}`);
+
+        let birthText = "🔒 Dates Restricted";
+        if (person.birth_date_display || person.birth_place_display) {
+            const bD = person.birth_date_display || "Unrecorded";
+            const bP = person.birth_place_display ? ` in ${person.birth_place_display}` : "";
+            birthText = `b. ${bD}${bP}`;
+        } else if (person.can_view_protected) {
+            birthText = "b. Date unrecorded";
+        }
+        card.append("text")
+            .attr("x", 12)
+            .attr("y", 64)
+            .attr("class", "privacy-tag")
+            .attr("fill", (person.birth_date_display || person.birth_place_display) ? "#334155" : "#94a3b8")
+            .text(birthText.length > 29 ? birthText.substring(0, 28) + '…' : birthText);
+
+        let deathText = "";
+        let deathColor = "#16a34a";
+        if (person.death_date_display || person.death_place_display) {
+            const dD = person.death_date_display || "Unrecorded";
+            const dP = person.death_place_display ? ` in ${person.death_place_display}` : "";
+            deathText = `d. ${dD}${dP}`;
+            deathColor = "#b91c1c";
+        } else if (person.is_deceased) {
+            deathText = person.can_view_protected ? "d. Date unrecorded" : "🔒 Deceased (Dates Restricted)";
+            deathColor = "#b91c1c";
+        } else {
+            deathText = "Living";
+            deathColor = "#16a34a";
+        }
+
+        card.append("text")
+            .attr("x", 12)
+            .attr("y", 80)
+            .attr("class", "privacy-tag")
+            .attr("fill", deathColor)
+            .text(deathText.length > 29 ? deathText.substring(0, 28) + '…' : deathText);
+
+        return card;
+    }
+
+    function getUnitSpan(spousesList, orientation = "V") {
+        const count = (spousesList && spousesList.length > 0) ? spousesList.length : 0;
+        if (orientation === "H") {
+            return {
+                width: cardWidth + 18,
+                height: cardHeight + count * (cardHeight + 14)
+            };
+        } else {
+            return {
+                width: cardWidth + count * (cardWidth + 18),
+                height: cardHeight + 14
+            };
+        }
+    }
+
+    function renderCoupleUnit(containerGroup, person, spousesList, primaryX, primaryY, orientation = "V") {
+        renderCard(containerGroup, person, primaryX, primaryY, false);
+
+        const spouses = (spousesList && spousesList.length > 0) ? spousesList : [];
+        spouses.forEach((sp, idx) => {
+            let sx, sy;
+            if (orientation === "H") {
+                sx = primaryX + 18;
+                sy = primaryY + (idx + 1) * (cardHeight + 14);
+
+                const startX = primaryX;
+                const startY = primaryY + cardHeight;
+                const targetX = sx;
+                const targetY = sy + cardHeight / 2;
+                const dropX = primaryX - 10;
+
+                containerGroup.append("path")
+                    .attr("class", "link-spouse")
+                    .attr("d", `M ${startX} ${startY} L ${dropX} ${startY} L ${dropX} ${targetY} L ${targetX} ${targetY}`);
+            } else {
+                sx = primaryX + (idx + 1) * (cardWidth + 18);
+                sy = primaryY + 14;
+
+                const startX = primaryX + cardWidth;
+                const startY = primaryY;
+                const targetX = sx + cardWidth / 2;
+                const targetY = sy;
+                const riseY = primaryY - 12;
+
+                containerGroup.append("path")
+                    .attr("class", "link-spouse")
+                    .attr("d", `M ${startX} ${startY} L ${startX} ${riseY} L ${targetX} ${riseY} L ${targetX} ${targetY}`);
+            }
+
+            renderCard(containerGroup, sp, sx, sy, false);
+        });
+
+        return getUnitSpan(spouses, orientation);
+    }
+
+    function buildAncestorTree(node, depth, baseTransverse, isH) {
+        if (!node) return { count: 0, minCoord: baseTransverse, maxCoord: baseTransverse };
+
+        const genBandCoord = isH ? -(depth * genStepH) : -(depth * genStepV);
+        const parents = [];
+        if (node.father) parents.push({ person: node.father, role: 'Father' });
+        if (node.mother) parents.push({ person: node.mother, role: 'Mother' });
+
+        if (parents.length === 0) {
+            return { count: 1, minCoord: baseTransverse, maxCoord: baseTransverse + (isH ? cardHeight : cardWidth) };
+        }
+
+        let curTransverse = baseTransverse;
+        const parentResults = [];
+
+        parents.forEach((p) => {
+            const subResult = buildAncestorTree(p.person, depth + 1, curTransverse, isH);
+            
+            const centeredPos = (subResult.count > 1) 
+                ? (subResult.minCoord + subResult.maxCoord) / 2 - (isH ? cardHeight / 2 : cardWidth / 2)
+                : curTransverse;
+            const parentPos = Math.max(curTransverse, centeredPos);
+
+            const px = isH ? genBandCoord : parentPos;
+            const py = isH ? parentPos : genBandCoord;
+
+            const otherParentId = (p.role === 'Father' && node.mother) 
+                ? (node.mother.individual_id || node.mother.id) 
+                : ((p.role === 'Mother' && node.father) ? (node.father.individual_id || node.father.id) : null);
+
+            const filteredSpouses = (p.person.spouses || []).filter(sp => {
+                const sId = sp.individual_id || sp.id;
+                return sId !== otherParentId;
+            });
+
+            const spousesToRender = (p.role === 'Mother' && node.father) ? [] : filteredSpouses;
+
+            renderCard(g, p.person, px, py, false);
+
+            let extraSpouseSpan = 0;
+            spousesToRender.forEach((sp, idx) => {
+                let sx, sy;
+                if (isH) {
+                    sx = px + 18;
+                    sy = py + cardHeight + 14 + idx * (cardHeight + 14);
+
+                    const startX = px;
+                    const startY = py + cardHeight;
+                    const targetX = sx;
+                    const targetY = sy + cardHeight / 2;
+                    const dropX = px - 10;
+
+                    g.append("path")
+                        .attr("class", "link-spouse")
+                        .attr("d", `M ${startX} ${startY} L ${dropX} ${startY} L ${dropX} ${targetY} L ${targetX} ${targetY}`);
+                } else {
+                    sx = px + cardWidth + 18 + idx * (cardWidth + 18);
+                    sy = py + 14;
+
+                    const startX = px + cardWidth;
+                    const startY = py;
+                    const targetX = sx + cardWidth / 2;
+                    const targetY = sy;
+                    const riseY = py - 12;
+
+                    g.append("path")
+                        .attr("class", "link-spouse")
+                        .attr("d", `M ${startX} ${startY} L ${startX} ${riseY} L ${targetX} ${riseY} L ${targetX} ${targetY}`);
+                }
+
+                renderCard(g, sp, sx, sy, false);
+                extraSpouseSpan += (isH ? cardHeight + 14 : cardWidth + 18);
+            });
+
+            if (subResult.unionJunction) {
+                g.append("path").attr("class", "link")
+                    .attr("d", path90(
+                        subResult.unionJunction.x, subResult.unionJunction.y,
+                        isH ? px : px + cardWidth / 2,
+                        isH ? py + cardHeight / 2 : py,
+                        isH ? "H" : "V"
+                    ));
+            }
+
+            const totalUnitW = cardWidth + (isH ? 0 : extraSpouseSpan);
+            const totalUnitH = cardHeight + (isH ? extraSpouseSpan : 0);
+
+            parentResults.push({ x: px, y: py, person: p.person, subResult: subResult, uSpan: { width: totalUnitW, height: totalUnitH } });
+            
+            curTransverse = Math.max(subResult.maxCoord, (isH ? py + totalUnitH : px + totalUnitW)) + slotGap + 20;
+        });
+
+        const fP = parentResults.find(pr => pr.person.gender === 'M');
+        const mP = parentResults.find(pr => pr.person.gender === 'F');
+
+        let levelUnionJunction = null;
+        if (fP && mP) {
+            if (isH) {
+                levelUnionJunction = {
+                    x: genBandCoord + cardWidth + 24,
+                    y: (fP.y + mP.y + cardHeight) / 2
+                };
+                g.append("path").attr("class", "link")
+                    .attr("d", `M ${fP.x + cardWidth} ${fP.y + cardHeight / 2} L ${levelUnionJunction.x} ${fP.y + cardHeight / 2} L ${levelUnionJunction.x} ${mP.y + cardHeight / 2} L ${mP.x + cardWidth} ${mP.y + cardHeight / 2}`);
+            } else {
+                levelUnionJunction = {
+                    x: (fP.x + mP.x + cardWidth) / 2,
+                    y: genBandCoord + cardHeight + 20
+                };
+                g.append("path").attr("class", "link")
+                    .attr("d", `M ${fP.x + cardWidth / 2} ${fP.y + cardHeight} L ${fP.x + cardWidth / 2} ${levelUnionJunction.y} L ${mP.x + cardWidth / 2} ${levelUnionJunction.y} L ${mP.x + cardWidth / 2} ${mP.y + cardHeight}`);
+            }
+        } else if (fP || mP) {
+            const single = fP || mP;
+            levelUnionJunction = {
+                x: isH ? single.x + cardWidth : single.x + cardWidth / 2,
+                y: isH ? single.y + cardHeight / 2 : single.y + cardHeight
+            };
+        }
+
+        return {
+            count: parents.length,
+            minCoord: parentResults[0] ? (isH ? parentResults[0].y : parentResults[0].x) : baseTransverse,
+            maxCoord: curTransverse - slotGap,
+            parents: parentResults,
+            unionJunction: levelUnionJunction
+        };
+    }
+
+    function renderRecursiveDescendants(node, depth, parentJunction, baseTransverse, isH) {
+        if (!node || !node.marriages || node.marriages.length === 0) return { width: 0, height: 0, endCoord: baseTransverse };
+
+        let allChildren = [];
+        node.marriages.forEach(m => {
+            if (m.children) {
+                m.children.forEach(c => allChildren.push({ child: c, marriageId: m.marriage_id }));
+            }
+        });
+
+        if (allChildren.length === 0) return { width: 0, height: 0, endCoord: baseTransverse };
+
+        const genBandCoord = isH ? (depth * genStepH) : (depth * genStepV);
+        let curTransverse = baseTransverse;
+
+        allChildren.forEach(item => {
+            const childX = isH ? genBandCoord : curTransverse;
+            const childY = isH ? curTransverse : genBandCoord;
+
+            g.append("path")
+                .attr("class", "link")
+                .attr("d", path90(
+                    parentJunction.x, parentJunction.y,
+                    isH ? childX : childX + cardWidth / 2,
+                    isH ? childY + cardHeight / 2 : childY,
+                    isH ? "H" : "V"
+                ));
+
+            const childSpouses = (item.child.marriages && item.child.marriages.length > 0)
+                ? item.child.marriages.map(cm => cm.spouse).filter(Boolean)
+                : (item.child.spouses || []);
+
+            const coupleDim = renderCoupleUnit(g, item.child, childSpouses, childX, childY, isH ? "H" : "V");
+
+            const nextJunction = {
+                x: isH ? childX + coupleDim.width : childX + cardWidth / 2,
+                y: isH ? childY + cardHeight / 2 : childY + cardHeight
+            };
+
+            const subDesc = renderRecursiveDescendants(item.child, depth + 1, nextJunction, curTransverse, isH);
+
+            const consumedStep = isH 
+                ? Math.max(coupleDim.height, subDesc.height) + slotGap 
+                : Math.max(coupleDim.width, subDesc.width) + slotGap;
+
+            curTransverse += consumedStep;
+        });
+
+        return {
+            width: isH ? genStepH : (curTransverse - baseTransverse),
+            height: isH ? (curTransverse - baseTransverse) : genStepV,
+            endCoord: curTransverse
+        };
+    }
+
+    function fitEntireTreeToScreen(duration = 450) {
+        const bbox = g.node().getBBox();
+        if (!bbox || bbox.width === 0 || bbox.height === 0) return;
+
+        const containerWidth = container.clientWidth;
+        const containerHeight = container.clientHeight;
+
+        const padding = 60;
+        const scaleX = (containerWidth - padding * 2) / bbox.width;
+        const scaleY = (containerHeight - padding * 2) / bbox.height;
+
+        let targetScale = Math.min(scaleX, scaleY);
+        targetScale = Math.min(targetScale, 1.0);
+        targetScale = Math.max(targetScale, 0.15);
+
+        const treeCenterX = bbox.x + bbox.width / 2;
+        const treeCenterY = bbox.y + bbox.height / 2;
+
+        const translateX = containerWidth / 2 - treeCenterX * targetScale;
+        const translateY = containerHeight / 2 - treeCenterY * targetScale;
+
+        const transform = d3.zoomIdentity.translate(translateX, translateY).scale(targetScale);
+
+        if (duration > 0) {
+            svg.transition().duration(duration).call(zoom.transform, transform);
+        } else {
+            svg.call(zoom.transform, transform);
+        }
+    }
+
+    document.getElementById("btn-zoom-in").addEventListener("click", () => svg.transition().call(zoom.scaleBy, 1.25));
+    document.getElementById("btn-zoom-out").addEventListener("click", () => svg.transition().call(zoom.scaleBy, 0.8));
+    document.getElementById("btn-reset").addEventListener("click", () => fitEntireTreeToScreen(350));
+    document.getElementById("btnCenterOnMe").addEventListener("click", () => loadTree(userRootId));
+    document.getElementById("btnPrintTree").addEventListener("click", () => {
+        fitEntireTreeToScreen(0);
+        setTimeout(() => { window.print(); }, 200);
+    });
+
+    document.querySelectorAll("input[name='treeOrientation']").forEach(radio => {
+        radio.addEventListener("change", function() {
+            currentOrientation = this.value;
+            loadTree(currentFocusId);
+        });
+    });
+
+    function loadTree(focusNodeId) {
+        currentFocusId = focusNodeId;
+        const apiEndpoint = `/genealogy/api/tree-data/${focusNodeId}/`;
+
+        fetch(apiEndpoint)
+            .then(response => response.json())
+            .then(payload => {
+                if (!payload.unified) return;
+                const data = payload.unified;
+                g.selectAll("*").remove();
+
+                document.getElementById("headerFocusName").innerText = data.name;
+                document.getElementById("headerFocusId").innerText = data.individual_id;
+                
+                const topEditBtn = document.getElementById("btnTopEditFocus");
+                if (data.can_edit) {
+                    topEditBtn.classList.remove("disabled", "d-none");
+                    topEditBtn.href = `/genealogy/individual/${data.individual_id}/edit/`;
+                } else {
+                    topEditBtn.classList.add("disabled", "d-none");
+                }
+
+                window.history.pushState({}, "", `/genealogy/tree/${data.individual_id}/`);
+
+                const isH = (currentOrientation === "H");
+                const focusSpouses = data.spouses || [];
+
+                // 1. DYNAMIC FOOTPRINT FOR PATERNAL & MATERNAL UNCLES
+                const pUncles = data.paternal_uncles_aunts || [];
+                const mUncles = data.maternal_uncles_aunts || [];
+
+                let pUnclesTotalSpan = 0;
+                pUncles.forEach(u => {
+                    const span = getUnitSpan(u.spouses, currentOrientation);
+                    pUnclesTotalSpan += (isH ? span.height : span.width) + slotGap;
+                });
+
+                let mUnclesTotalSpan = 0;
+                mUncles.forEach(u => {
+                    const span = getUnitSpan(u.spouses, currentOrientation);
+                    mUnclesTotalSpan += (isH ? span.height : span.width) + slotGap;
+                });
+
+                // Build Parents and Ancestors strictly starting PAST all paternal uncles!
+                const focusAncestors = data.ancestor_tree || data.ancestors;
+                let block1AncBounds = { minCoord: pUnclesTotalSpan, maxCoord: pUnclesTotalSpan + cardHeight, count: 0 };
+                if (focusAncestors && (focusAncestors.father || focusAncestors.mother)) {
+                    block1AncBounds = buildAncestorTree(focusAncestors, 1, pUnclesTotalSpan, isH);
+                }
+
+                // Focus Person Placement (Generation 0)
+                let focusX, focusY;
+                if (isH) {
+                    focusX = 0;
+                    focusY = (block1AncBounds.count > 0)
+                        ? (block1AncBounds.minCoord + block1AncBounds.maxCoord) / 2 - cardHeight / 2
+                        : pUnclesTotalSpan;
+                } else {
+                    focusX = (block1AncBounds.count > 0)
+                        ? (block1AncBounds.minCoord + block1AncBounds.maxCoord) / 2 - cardWidth / 2
+                        : pUnclesTotalSpan;
+                    focusY = 0;
+                }
+
+                renderCard(g, data, focusX, focusY, true);
+
+                // Parents' Union Junction to Focus Person
+                let parentsUnionJunction = block1AncBounds.unionJunction;
+                const fatherNode = block1AncBounds.parents ? block1AncBounds.parents.find(p => p.person.gender === 'M') : null;
+                const motherNode = block1AncBounds.parents ? block1AncBounds.parents.find(p => p.person.gender === 'F') : null;
+
+                if (parentsUnionJunction) {
+                    g.append("path")
+                        .attr("class", "link")
+                        .attr("d", path90(
+                            parentsUnionJunction.x, parentsUnionJunction.y,
+                            isH ? focusX : focusX + cardWidth / 2,
+                            isH ? focusY + cardHeight / 2 : focusY,
+                            isH ? "H" : "V"
+                        ));
+                }
+
+                // Grandparents Union Junction
+                let grandParentsUnion = null;
+                if (fatherNode && fatherNode.subResult && fatherNode.subResult.unionJunction) {
+                    grandParentsUnion = fatherNode.subResult.unionJunction;
+
+                    g.append("path").attr("class", "link")
+                        .attr("d", path90(
+                            grandParentsUnion.x, grandParentsUnion.y,
+                            isH ? fatherNode.x : fatherNode.x + cardWidth / 2,
+                            isH ? fatherNode.y + cardHeight / 2 : fatherNode.y,
+                            isH ? "H" : "V"
+                        ));
+                }
+
+                // --- RENDER PATERNAL UNCLES IN THEIR DEDICATED SEPARATE LEFT BLOCK ---
+                if (fatherNode && pUncles.length > 0) {
+                    let curPUncleCoord = isH ? (fatherNode.x - slotGap) : (fatherNode.x - slotGap);
+
+                    pUncles.forEach(u => {
+                        const uSpan = getUnitSpan(u.spouses, currentOrientation);
+                        curPUncleCoord -= (isH ? uSpan.height : uSpan.width);
+
+                        const ux = isH ? -genStepH : curPUncleCoord;
+                        const uy = isH ? curPUncleCoord : -genStepV;
+
+                        if (grandParentsUnion) {
+                            g.append("path").attr("class", "link-sibling")
+                                .attr("d", path90(
+                                    grandParentsUnion.x, grandParentsUnion.y,
+                                    isH ? ux : ux + cardWidth / 2,
+                                    isH ? uy + cardHeight / 2 : uy,
+                                    isH ? "H" : "V"
+                                ));
+                        } else {
+                            g.append("path").attr("class", "link-sibling")
+                                .attr("d", path90(
+                                    isH ? fatherNode.x : fatherNode.x + cardWidth / 2,
+                                    isH ? fatherNode.y + cardHeight / 2 : fatherNode.y,
+                                    isH ? ux : ux + cardWidth / 2,
+                                    isH ? uy + cardHeight / 2 : uy,
+                                    isH ? "H" : "V"
+                                ));
+                        }
+
+                        renderCoupleUnit(g, u, u.spouses, ux, uy, isH ? "H" : "V");
+                        curPUncleCoord -= slotGap;
+                    });
+                }
+
+                // Render Maternal Uncles in their dedicated separate block
+                if (motherNode && mUncles.length > 0) {
+                    const motherWidth = isH ? motherNode.uSpan.height : motherNode.uSpan.width;
+                    let curMUncleCoord = isH 
+                        ? (motherNode.y + motherWidth + slotGap) 
+                        : (motherNode.x + motherWidth + slotGap);
+
+                    mUncles.forEach(u => {
+                        const ux = isH ? -genStepH : curMUncleCoord;
+                        const uy = isH ? curMUncleCoord : -genStepV;
+
+                        g.append("path").attr("class", "link-sibling")
+                            .attr("d", path90(
+                                isH ? motherNode.x : motherNode.x + cardWidth / 2,
+                                isH ? motherNode.y + cardHeight / 2 : motherNode.y,
+                                isH ? ux : ux + cardWidth / 2,
+                                isH ? uy + cardHeight / 2 : uy,
+                                isH ? "H" : "V"
+                            ));
+
+                        const uSpan = renderCoupleUnit(g, u, u.spouses, ux, uy, isH ? "H" : "V");
+                        curMUncleCoord += (isH ? uSpan.height : uSpan.width) + slotGap;
+                    });
+                }
+
+                const block1TotalEnd = Math.max(
+                    block1AncBounds.maxCoord + mUnclesTotalSpan,
+                    (isH ? focusY + cardHeight : focusX + cardWidth)
+                );
+
+                // 2. SPOUSE BLOCKS (Generation 0)
+                let currentTransverse = block1TotalEnd + slotGap + 24;
+
+                focusSpouses.forEach((sp) => {
+                    let spX, spY;
+                    let spAncBounds = { minCoord: currentTransverse, maxCoord: currentTransverse + (isH ? cardHeight : cardWidth), count: 0 };
+
+                    const spAnc = sp.ancestor_tree || sp.ancestors;
+                    if (spAnc && (spAnc.father || spAnc.mother)) {
+                        spAncBounds = buildAncestorTree(spAnc, 1, currentTransverse, isH);
+                    }
+
+                    if (isH) {
+                        spX = focusX + 18;
+                        spY = (spAncBounds.count > 0) 
+                            ? (spAncBounds.minCoord + spAncBounds.maxCoord) / 2 - cardHeight / 2 
+                            : currentTransverse;
+
+                        const startX = focusX;
+                        const startY = focusY + cardHeight;
+                        const targetX = spX;
+                        const targetY = spY + cardHeight / 2;
+                        const dropX = focusX - 10;
+
+                        g.append("path")
+                            .attr("class", "link-spouse")
+                            .attr("d", `M ${startX} ${startY} L ${dropX} ${startY} L ${dropX} ${targetY} L ${targetX} ${targetY}`);
+                    } else {
+                        spX = (spAncBounds.count > 0) 
+                            ? (spAncBounds.minCoord + spAncBounds.maxCoord) / 2 - cardWidth / 2 
+                            : currentTransverse;
+                        spY = focusY + 14;
+
+                        const startX = focusX + cardWidth;
+                        const startY = focusY;
+                        const targetX = spX + cardWidth / 2;
+                        const targetY = spY;
+                        const riseY = focusY - 12;
+
+                        g.append("path")
+                            .attr("class", "link-spouse")
+                            .attr("d", `M ${startX} ${startY} L ${startX} ${riseY} L ${targetX} ${riseY} L ${targetX} ${targetY}`);
+                    }
+
+                    renderCard(g, sp, spX, spY, false);
+
+                    if (spAncBounds.unionJunction) {
+                        g.append("path")
+                            .attr("class", "link")
+                            .attr("d", path90(
+                                spAncBounds.unionJunction.x, spAncBounds.unionJunction.y,
+                                isH ? spX : spX + cardWidth / 2,
+                                isH ? spY + cardHeight / 2 : spY,
+                                isH ? "H" : "V"
+                            ));
+                    }
+
+                    currentTransverse = Math.max(spAncBounds.maxCoord, (isH ? spY + cardHeight : spX + cardWidth)) + slotGap + 24;
+                });
+
+                // 3. FOCUS PERSON'S DESCENDANTS (Generation -1, -2...)
+                let focusChildrenEndCoord = currentTransverse;
+                if (data.marriages && data.marriages.length > 0) {
+                    let defaultJunction = {
+                        x: isH ? focusX + cardWidth : focusX + cardWidth / 2,
+                        y: isH ? focusY + cardHeight / 2 : focusY + cardHeight
+                    };
+
+                    const focusChildrenStartCoord = isH ? (focusY - 60) : (focusX - 60);
+                    const descResult = renderRecursiveDescendants(data, 1, defaultJunction, focusChildrenStartCoord, isH);
+                    focusChildrenEndCoord = Math.max(currentTransverse, descResult.endCoord + slotGap);
+                }
+
+                // 4. SIBLINGS AND THEIR DESCENDANTS (Generation 0 & -1)
+                currentTransverse = Math.max(currentTransverse, focusChildrenEndCoord) + slotGap;
+
+                if (data.siblings && data.siblings.length > 0) {
+                    data.siblings.forEach(sib => {
+                        const sibX = isH ? focusX : currentTransverse;
+                        const sibY = isH ? currentTransverse : focusY;
+
+                        if (parentsUnionJunction) {
+                            g.append("path").attr("class", "link-sibling")
+                                .attr("d", path90(
+                                    parentsUnionJunction.x, parentsUnionJunction.y,
+                                    isH ? sibX : sibX + cardWidth / 2,
+                                    isH ? sibY + cardHeight / 2 : sibY,
+                                    isH ? "H" : "V"
+                                ));
+                        }
+
+                        const sibDim = renderCoupleUnit(g, sib, sib.spouses, sibX, sibY, isH ? "H" : "V");
+
+                        if (sib.marriages && sib.marriages.length > 0) {
+                            const sibJunction = {
+                                x: isH ? sibX + sibDim.width : sibX + cardWidth / 2,
+                                y: isH ? sibY + cardHeight / 2 : sibY + cardHeight
+                            };
+                            const sibDesc = renderRecursiveDescendants(sib, 1, sibJunction, isH ? sibY : sibX, isH);
+                            currentTransverse += isH 
+                                ? Math.max(sibDim.height, sibDesc.height) + slotGap 
+                                : Math.max(sibDim.width, sibDesc.width) + slotGap;
+                        } else {
+                            currentTransverse += isH 
+                                ? (sibDim.height + slotGap) 
+                                : (sibDim.width + slotGap);
+                        }
+                    });
+                }
+
+                requestAnimationFrame(() => {
+                    fitEntireTreeToScreen(0);
+                });
+            })
+            .catch(err => console.error("Error loading tree data:", err));
+    }
+
+    function openDrawer(data) {
+        const personId = data.individual_id || data.id;
+        if (!personId) return;
+
+        const canEdit = !!data.can_edit;
+
+        document.getElementById("drawerName").innerText = data.name || personId;
+        document.getElementById("drawerId").innerText = personId;
+        document.getElementById("drawerGender").innerText = data.gender === 'M' ? 'Male' : (data.gender === 'F' ? 'Female' : 'Other');
+
+        const accessBadge = document.getElementById("drawerAccessBadge");
+        if (accessBadge) {
+            accessBadge.innerText = canEdit ? 'Edit Access' : 'View Only';
+            accessBadge.className = `badge ms-1 ${canEdit ? 'bg-success text-white' : 'bg-secondary text-white'}`;
+        }
+
+        const avatarContainer = document.getElementById("drawerAvatarContainer");
+        if (avatarContainer) {
+            if (data.photo_url) {
+                avatarContainer.innerHTML = `<img src="${data.photo_url}" class="rounded-circle shadow-sm" width="90" height="90" style="object-fit: cover;">`;
+            } else {
+                avatarContainer.innerHTML = `<div class="display-6 text-primary"><i class="bi bi-person-circle"></i></div>`;
+            }
+        }
+
+        const bDate = data.birth_date_display;
+        const bPlace = data.birth_place_display;
+        document.getElementById("drawerBirth").innerText = (bDate || bPlace) ? `${bDate || 'Unrecorded date'}${bPlace ? ' — ' + bPlace : ''}` : "Restricted by Family Privacy";
+
+        const dDate = data.death_date_display;
+        const dPlace = data.death_place_display;
+        if (dDate || dPlace) {
+            document.getElementById("drawerDeath").innerText = `${dDate || 'Unrecorded date'}${dPlace ? ' — ' + dPlace : ''}`;
+        } else if (data.is_deceased) {
+            document.getElementById("drawerDeath").innerText = data.can_view_protected ? "Deceased (Date unrecorded)" : "Restricted by Family Privacy";
+        } else {
+            document.getElementById("drawerDeath").innerText = "Living";
+        }
+
+        document.getElementById("btnDrawerFocusNow").onclick = function() {
+            if (offcanvasInstance) offcanvasInstance.hide();
+            loadTree(personId);
+        };
+
+        const editLink = document.getElementById("btnDrawerEdit");
+        const editDisabledBadge = document.getElementById("drawerEditDisabledBadge");
+
+        if (canEdit) {
+            editLink.classList.remove("d-none");
+            editLink.href = `/genealogy/individual/${personId}/edit/`;
+            if (editDisabledBadge) editDisabledBadge.classList.add("d-none");
+        } else {
+            editLink.classList.add("d-none");
+            if (editDisabledBadge) editDisabledBadge.classList.remove("d-none");
+        }
+
+        document.getElementById("btnDrawerContacts").href = `/contacts/manage/${personId}/`;
+
+        if (offcanvasInstance) {
+            offcanvasInstance.show();
+        }
+    }
+
+    loadTree(currentFocusId);
+});
+</script>
+{% endblock %}

@@ -1,0 +1,750 @@
+{% extends "base.html" %}
+
+{% block title %}{{ title }}{% endblock %}
+
+{% block extra_css %}
+<!-- TomSelect Bootstrap 5 Theme -->
+<link href="https://cdn.jsdelivr.net/npm/tom-select@2.3.1/dist/css/tom-select.bootstrap5.min.css" rel="stylesheet">
+<style>
+    .pac-container { z-index: 99999 !important; border-radius: 6px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); }
+    .location-map-box { height: 180px; width: 100%; background-color: #f1f5f9; border-radius: 6px; border: 1px solid #cbd5e1; }
+    .section-title { font-size: 0.825rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; color: #475569; border-bottom: 2px solid #e2e8f0; padding-bottom: 0.25rem; margin-bottom: 0.65rem; }
+    .compact-card { background: #ffffff; border: 1px solid #e2e8f0; border-radius: 6px; }
+
+    /* TomSelect Customization */
+    .ts-control { border-radius: 0.25rem !important; font-size: 0.825rem !important; min-height: 31px !important; padding: 3px 8px !important; border-color: #cbd5e1 !important; }
+    .ts-dropdown { z-index: 1050 !important; font-size: 0.825rem !important; border-radius: 6px !important; box-shadow: 0 4px 12px rgba(0,0,0,0.15) !important; }
+
+    /* Tree Node Cards */
+    .tree-card-node { width: 210px; min-width: 210px; height: 95px; border-radius: 6px; border: 1.5px solid #cbd5e1; background: #f8fafc; position: relative; padding: 8px 10px; box-sizing: border-box; display: flex; flex-direction: column; justify-content: space-between; }
+    .tree-card-node:hover { box-shadow: 0 4px 10px rgba(0,0,0,0.14); }
+    .tree-card-male { background-color: #eff6ff !important; border-color: #3b82f6 !important; }
+    .tree-card-female { background-color: #fdf2f8 !important; border-color: #ec4899 !important; }
+    .tree-card-avatar { width: 36px; height: 36px; border-radius: 50%; object-fit: cover; }
+    .tree-card-avatar-placeholder { width: 36px; height: 36px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: bold; }
+    .tree-card-male .tree-card-avatar-placeholder { background-color: #bfdbfe; color: #1e3a8a; }
+    .tree-card-female .tree-card-avatar-placeholder { background-color: #fbcfe8; color: #831843; }
+    .tree-card-title { font-size: 13px; font-weight: 700; color: #0f172a; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 135px; line-height: 1.2; }
+    .tree-card-sub { font-size: 11px; color: #64748b; line-height: 1.1; }
+    .tree-card-event { font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 1.2; }
+    .tree-card-actions { position: absolute; bottom: 4px; right: 6px; display: flex; gap: 3px; }
+    .tree-card-actions a { font-size: 10px; padding: 1px 4px; text-decoration: none; border-radius: 3px; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid px-3 py-2" style="max-width: 1240px;">
+    <!-- Top Bar -->
+    <div class="d-flex justify-content-between align-items-center mb-2 pb-2 border-bottom">
+        <div>
+            <h5 class="fw-bold text-primary mb-0 d-inline-block">
+                <i class="bi bi-person-fill-gear me-1"></i>{{ title }}
+            </h5>
+            {% if individual and individual.pk %}
+                <span class="badge bg-secondary ms-2">{{ individual.individual_id }}</span>
+            {% endif %}
+        </div>
+        <div class="d-flex gap-1">
+            {% if individual and individual.pk %}
+                <a href="{% url 'contacts:manage_contacts' individual.individual_id %}" class="btn btn-outline-primary btn-sm py-0 px-2">
+                    <i class="bi bi-telephone me-1"></i>Contacts
+                </a>
+                <a href="{% url 'genealogy:individual_tree' individual.individual_id %}" class="btn btn-outline-secondary btn-sm py-0 px-2">
+                    <i class="bi bi-diagram-3 me-1"></i>Tree
+                </a>
+            {% endif %}
+            <a href="{% url 'genealogy:my_tree' %}" class="btn btn-outline-secondary btn-sm py-0 px-2">Cancel</a>
+        </div>
+    </div>
+
+    {% if form.non_field_errors %}
+        <div class="alert alert-danger py-1 px-3 mb-2 small">
+            {% for error in form.non_field_errors %}{{ error }}<br>{% endfor %}
+        </div>
+    {% endif %}
+
+    <form method="post" enctype="multipart/form-data" novalidate id="individualForm">
+        {% csrf_token %}
+        <input type="hidden" name="parent_marriage_id" value="{{ parent_marriage_id|default:'' }}">
+
+        <div class="row g-2">
+            <!-- ============================================================== -->
+            <!-- LEFT COLUMN: Profile Photo, Demographics, Birth, Death        -->
+            <!-- ============================================================== -->
+            <div class="col-lg-5">
+                <!-- 1. Identity & Demographics -->
+                <div class="compact-card p-2 mb-2">
+                    <div class="section-title mb-2">1. Identity & Demographics</div>
+                    <div class="d-flex align-items-start gap-2 mb-2">
+                        <div class="text-center" style="min-width: 75px;">
+                            {% if current_photo and current_photo.image_file %}
+                                <img id="profile_photo_preview" src="{{ current_photo.image_file.url }}" alt="Photo" class="rounded-circle border shadow-sm" style="width: 70px; height: 70px; object-fit: cover;">
+                            {% else %}
+                                <div id="profile_photo_placeholder" class="rounded-circle border bg-light d-flex align-items-center justify-content-center text-muted mx-auto shadow-sm" style="width: 70px; height: 70px; font-size: 2rem;">
+                                    <i class="bi bi-person"></i>
+                                </div>
+                                <img id="profile_photo_preview" src="#" alt="Preview" class="rounded-circle border shadow-sm d-none mx-auto" style="width: 70px; height: 70px; object-fit: cover;">
+                            {% endif %}
+                            <label class="btn btn-outline-secondary btn-xs mt-1 py-0 px-1 w-100" for="id_profile_photo" style="font-size: 0.72rem;">
+                                <i class="bi bi-camera me-1"></i>Upload
+                            </label>
+                            <div class="d-none">{{ form.profile_photo }}</div>
+                        </div>
+
+                        <div class="flex-grow-1">
+                            <div class="row g-1">
+                                <div class="col-md-4">
+                                    <label class="form-label small fw-semibold mb-0">First Name</label>
+                                    {{ form.first_name }}
+                                    <div class="invalid-feedback small" id="err_first_name"></div>
+                                </div>
+                                <div class="col-md-4">
+                                    <label class="form-label small fw-semibold mb-0">Middle Name</label>
+                                    {{ form.middle_name }}
+                                    <div class="invalid-feedback small" id="err_middle_name"></div>
+                                </div>
+                                <div class="col-md-4">
+                                    <label class="form-label small fw-semibold mb-0">Last Name</label>
+                                    {{ form.last_name }}
+                                    <div class="invalid-feedback small" id="err_last_name"></div>
+                                </div>
+                                <div class="col-12 mt-1">
+                                    <div class="d-flex justify-content-between align-items-center">
+                                        <small class="text-muted" id="nameCounter" style="font-size: 0.72rem;">Combined Letters: 0 / 4 min</small>
+                                        <span class="badge bg-secondary py-0" id="nameValidBadge" style="font-size: 0.7rem;">Incomplete</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="row g-2 pt-1 border-top">
+                        <div class="col-md-4">
+                            <label class="form-label small fw-semibold mb-0">Gender *</label>
+                            {{ form.gender }}
+                            {% if form.is_gender_locked %}
+                                <input type="hidden" name="gender" value="{{ form.instance.gender }}">
+                                <small class="text-muted d-block" style="font-size: 0.7rem;"><i class="bi bi-lock-fill text-warning"></i> Locked by union</small>
+                            {% endif %}
+                        </div>
+                        <div class="col-md-8">
+                            <label class="form-label small fw-semibold mb-0">Attach to Lineage Union (M000000X)</label>
+                            {{ form.parent_marriage }}
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 2. Birth Event Block -->
+                <div class="compact-card p-2 mb-2 date-block-container" data-prefix="birth">
+                    <div class="section-title mb-2">2. Birth Event</div>
+                    <div class="row g-1 align-items-end">
+                        <div class="col-md-4">
+                            <label class="form-label small fw-semibold mb-0">Precision</label>
+                            {{ form.birth_date_precision }}
+                        </div>
+
+                        <div class="col-md-4 date-field-wrapper" id="birth_start_wrapper">
+                            <label class="form-label small fw-semibold mb-0 date-label" id="birth_start_label">Date</label>
+                            {{ form.birth_date_start }}
+                        </div>
+
+                        <div class="col-md-4 date-field-wrapper d-none" id="birth_year_wrapper">
+                            <label class="form-label small fw-semibold mb-0">Year</label>
+                            {{ form.birth_year_val }}
+                        </div>
+
+                        <div class="col-md-4 date-field-wrapper d-none" id="birth_month_wrapper">
+                            <label class="form-label small fw-semibold mb-0">Year & Month</label>
+                            {{ form.birth_year_month }}
+                        </div>
+
+                        <div class="col-md-4 date-field-wrapper d-none" id="birth_end_wrapper">
+                            <label class="form-label small fw-semibold mb-0 text-danger">End Date</label>
+                            {{ form.birth_date_end }}
+                        </div>
+
+                        <div class="col-12 mt-1">
+                            <label class="form-label small fw-semibold mb-0">Formatted Date (Read-Only)</label>
+                            {{ form.birth_date_text }}
+                        </div>
+
+                        <div class="col-12 mt-1">
+                            <label class="form-label small fw-semibold mb-0">Place of Birth</label>
+                            {{ form.birth_place }}
+                            <div id="birth_place_map" class="location-map-box mt-1 d-none"></div>
+                            {{ form.birth_formatted_address }}{{ form.birth_place_id }}{{ form.birth_lat }}{{ form.birth_lng }}
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 3. Death Event Block -->
+                <div class="compact-card p-2 mb-2 date-block-container" data-prefix="death">
+                    <div class="section-title mb-2">3. Death Event</div>
+                    <div class="row g-1 align-items-end">
+                        <div class="col-md-4">
+                            <label class="form-label small fw-semibold mb-0">Precision</label>
+                            {{ form.death_date_precision }}
+                        </div>
+
+                        <div class="col-md-4 date-field-wrapper" id="death_start_wrapper">
+                            <label class="form-label small fw-semibold mb-0 date-label" id="death_start_label">Date</label>
+                            {{ form.death_date_start }}
+                        </div>
+
+                        <div class="col-md-4 date-field-wrapper d-none" id="death_year_wrapper">
+                            <label class="form-label small fw-semibold mb-0">Year</label>
+                            {{ form.death_year_val }}
+                        </div>
+
+                        <div class="col-md-4 date-field-wrapper d-none" id="death_month_wrapper">
+                            <label class="form-label small fw-semibold mb-0">Year & Month</label>
+                            {{ form.death_year_month }}
+                        </div>
+
+                        <div class="col-md-4 date-field-wrapper d-none" id="death_end_wrapper">
+                            <label class="form-label small fw-semibold mb-0 text-danger">End Date</label>
+                            {{ form.death_date_end }}
+                        </div>
+
+                        <div class="col-12 mt-1">
+                            <label class="form-label small fw-semibold mb-0">Formatted Date (Read-Only)</label>
+                            {{ form.death_date_text }}
+                        </div>
+
+                        <div class="col-12 mt-1">
+                            <label class="form-label small fw-semibold mb-0">Place of Death</label>
+                            {{ form.death_place }}
+                            <div id="death_place_map" class="location-map-box mt-1 d-none"></div>
+                            {{ form.death_formatted_address }}{{ form.death_place_id }}{{ form.death_lat }}{{ form.death_lng }}
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ============================================================== -->
+            <!-- RIGHT COLUMN: Parents, Spouses & Children, Quick Add          -->
+            <!-- ============================================================== -->
+            <div class="col-lg-7">
+                <!-- 4. Parents Block -->
+                <div class="compact-card p-2 mb-2">
+                    <div class="d-flex justify-content-between align-items-center border-bottom pb-1 mb-2">
+                        <span class="section-title border-0 pb-0 mb-0">4. Parents</span>
+                        {% if individual.parent_marriage %}
+                            <span class="badge bg-light text-dark border">Union: {{ individual.parent_marriage.marriage_id }}</span>
+                        {% endif %}
+                    </div>
+
+                    <div class="d-flex flex-wrap gap-2">
+                        <!-- Father Tree Card -->
+                        {% if father %}
+                            <div class="tree-card-node tree-card-male shadow-sm">
+                                <div class="d-flex align-items-center gap-2">
+                                    {% if father.photo_url %}
+                                        <img src="{{ father.photo_url }}" class="tree-card-avatar" alt="{{ father.name }}">
+                                    {% else %}
+                                        <div class="tree-card-avatar-placeholder">♂</div>
+                                    {% endif %}
+                                    <div class="overflow-hidden">
+                                        <div class="tree-card-title">{{ father.name }}</div>
+                                        <div class="tree-card-sub">{{ father.individual_id }} (M) {% if father.can_edit %}✎{% else %}🔒{% endif %}</div>
+                                    </div>
+                                </div>
+                                <div class="tree-card-event text-muted">
+                                    b. {{ father.birth_date_display|default:'Unrecorded' }}{% if father.birth_place_display %} in {{ father.birth_place_display }}{% endif %}
+                                </div>
+                                <div class="tree-card-event {% if father.is_deceased %}text-danger{% else %}text-success{% endif %}">
+                                    {% if father.death_date_display or father.death_place_display %}d. {{ father.death_date_display|default:'Unrecorded' }}{% else %}Living{% endif %}
+                                </div>
+                                <div class="tree-card-actions">
+                                    {% if father.can_edit %}<a href="{% url 'genealogy:individual_edit' father.individual_id %}" class="bg-primary text-white">Edit</a>{% endif %}
+                                    <a href="{% url 'genealogy:individual_tree' father.individual_id %}" class="bg-secondary text-white">Tree</a>
+                                </div>
+                            </div>
+                        {% else %}
+                            <div class="p-2 border rounded bg-light" style="width: 210px; min-height: 95px;">
+                                <span class="badge bg-secondary mb-1">Father: Unrecorded</span>
+                                {{ form.assign_father }}
+                                <div class="mt-1">{{ form.new_father_name }}</div>
+                            </div>
+                        {% endif %}
+
+                        <!-- Mother Tree Card -->
+                        {% if mother %}
+                            <div class="tree-card-node tree-card-female shadow-sm">
+                                <div class="d-flex align-items-center gap-2">
+                                    {% if mother.photo_url %}
+                                        <img src="{{ mother.photo_url }}" class="tree-card-avatar" alt="{{ mother.name }}">
+                                    {% else %}
+                                        <div class="tree-card-avatar-placeholder">♀</div>
+                                    {% endif %}
+                                    <div class="overflow-hidden">
+                                        <div class="tree-card-title">{{ mother.name }}</div>
+                                        <div class="tree-card-sub">{{ mother.individual_id }} (F) {% if mother.can_edit %}✎{% else %}🔒{% endif %}</div>
+                                    </div>
+                                </div>
+                                <div class="tree-card-event text-muted">
+                                    b. {{ mother.birth_date_display|default:'Unrecorded' }}{% if mother.birth_place_display %} in {{ mother.birth_place_display }}{% endif %}
+                                </div>
+                                <div class="tree-card-event {% if mother.is_deceased %}text-danger{% else %}text-success{% endif %}">
+                                    {% if mother.death_date_display or mother.death_place_display %}d. {{ mother.death_date_display|default:'Unrecorded' }}{% else %}Living{% endif %}
+                                </div>
+                                <div class="tree-card-actions">
+                                    {% if mother.can_edit %}<a href="{% url 'genealogy:individual_edit' mother.individual_id %}" class="bg-primary text-white">Edit</a>{% endif %}
+                                    <a href="{% url 'genealogy:individual_tree' mother.individual_id %}" class="bg-secondary text-white">Tree</a>
+                                </div>
+                            </div>
+                        {% else %}
+                            <div class="p-2 border rounded bg-light" style="width: 210px; min-height: 95px;">
+                                <span class="badge bg-secondary mb-1">Mother: Unrecorded</span>
+                                {{ form.assign_mother }}
+                                <div class="mt-1">{{ form.new_mother_name }}</div>
+                            </div>
+                        {% endif %}
+                    </div>
+                </div>
+
+                <!-- 5. Spouses & Children with Visual Tree Cards -->
+                {% if individual and individual.pk %}
+                    <div class="compact-card p-2 mb-2">
+                        <div class="section-title mb-2">5. Spouse(s) & Children</div>
+                        {% if marriages_data %}
+                            <div class="vstack gap-2">
+                                {% for m_item in marriages_data %}
+                                    <div class="p-2 border rounded bg-white shadow-sm">
+                                        <div class="d-flex justify-content-between align-items-center mb-2 pb-1 border-bottom">
+                                            <div>
+                                                <span class="badge bg-secondary">{{ m_item.marriage.marriage_id }}</span>
+                                                <span class="small fw-bold text-muted">Spouse:</span>
+                                            </div>
+                                            <a href="{% url 'genealogy:individual_add' %}?parent_marriage={{ m_item.marriage.marriage_id }}" class="btn btn-success btn-xs py-0 px-2" style="font-size: 0.72rem;">
+                                                <i class="bi bi-person-plus me-1"></i>Add Child
+                                            </a>
+                                        </div>
+
+                                        {% if m_item.spouse %}
+                                            <div class="tree-card-node {% if m_item.spouse.gender == 'M' %}tree-card-male{% else %}tree-card-female{% endif %} mb-2 shadow-sm">
+                                                <div class="d-flex align-items-center gap-2">
+                                                    {% if m_item.spouse.photo_url %}
+                                                        <img src="{{ m_item.spouse.photo_url }}" class="tree-card-avatar" alt="{{ m_item.spouse.name }}">
+                                                    {% else %}
+                                                        <div class="tree-card-avatar-placeholder">{% if m_item.spouse.gender == 'M' %}♂{% else %}♀{% endif %}</div>
+                                                    {% endif %}
+                                                    <div class="overflow-hidden">
+                                                        <div class="tree-card-title">{{ m_item.spouse.name }}</div>
+                                                        <div class="tree-card-sub">{{ m_item.spouse.individual_id }} ({{ m_item.spouse.gender }})</div>
+                                                    </div>
+                                                </div>
+                                                <div class="tree-card-event text-muted">b. {{ m_item.spouse.birth_date_display|default:'Unrecorded' }}</div>
+                                                <div class="tree-card-event {% if m_item.spouse.is_deceased %}text-danger{% else %}text-success{% endif %}">
+                                                    {% if m_item.spouse.death_date_display %}d. {{ m_item.spouse.death_date_display }}{% else %}Living{% endif %}
+                                                </div>
+                                                <div class="tree-card-actions">
+                                                    {% if m_item.spouse.can_edit %}<a href="{% url 'genealogy:individual_edit' m_item.spouse.individual_id %}" class="bg-primary text-white">Edit</a>{% endif %}
+                                                    <a href="{% url 'genealogy:individual_tree' m_item.spouse.individual_id %}" class="bg-secondary text-white">Tree</a>
+                                                </div>
+                                            </div>
+                                        {% endif %}
+
+                                        <!-- Children -->
+                                        <div class="d-flex flex-wrap gap-2 pt-1">
+                                            {% for child in m_item.children %}
+                                                <div class="tree-card-node {% if child.gender == 'M' %}tree-card-male{% else %}tree-card-female{% endif %} shadow-sm">
+                                                    <div class="d-flex align-items-center gap-2">
+                                                        {% if child.photo_url %}
+                                                            <img src="{{ child.photo_url }}" class="tree-card-avatar" alt="{{ child.name }}">
+                                                        {% else %}
+                                                            <div class="tree-card-avatar-placeholder">{% if child.gender == 'M' %}♂{% else %}♀{% endif %}</div>
+                                                        {% endif %}
+                                                        <div class="overflow-hidden">
+                                                            <div class="tree-card-title">{{ child.name }}</div>
+                                                            <div class="tree-card-sub">{{ child.individual_id }} ({{ child.gender }})</div>
+                                                        </div>
+                                                    </div>
+                                                    <div class="tree-card-event text-muted">b. {{ child.birth_date_display|default:'Unrecorded' }}</div>
+                                                    <div class="tree-card-event {% if child.is_deceased %}text-danger{% else %}text-success{% endif %}">
+                                                        {% if child.death_date_display %}d. {{ child.death_date_display }}{% else %}Living{% endif %}
+                                                    </div>
+                                                    <div class="tree-card-actions">
+                                                        {% if child.can_edit %}<a href="{% url 'genealogy:individual_edit' child.individual_id %}" class="bg-primary text-white">Edit</a>{% endif %}
+                                                        <a href="{% url 'genealogy:individual_tree' child.individual_id %}" class="bg-secondary text-white">Tree</a>
+                                                    </div>
+                                                </div>
+                                            {% empty %}
+                                                <span class="text-muted small fst-italic">No children recorded.</span>
+                                            {% endfor %}
+                                        </div>
+                                    </div>
+                                {% endfor %}
+                            </div>
+                        {% endif %}
+                    </div>
+                {% endif %}
+
+                <!-- 6. Marriage / Spouse Block -->
+                <div class="compact-card p-2 mb-2 date-block-container" data-prefix="marriage">
+                    <div class="section-title mb-2">6. Record New / Additional Spouse</div>
+                    <div class="row g-1">
+                        <div class="col-md-6">
+                            <label class="form-label small fw-semibold mb-0">Spouse Mode</label>
+                            {{ form.add_spouse_mode }}
+                        </div>
+                        <div class="col-md-6" id="existing_spouse_wrapper" style="display: none;">
+                            <label class="form-label small fw-semibold mb-0">Select Existing Member</label>
+                            {{ form.existing_spouse }}
+                        </div>
+                    </div>
+
+                    <div class="row g-1 mt-1 new_spouse_fields" style="display: none;">
+                        <div class="col-md-4">{{ form.new_spouse_first_name }}</div>
+                        <div class="col-md-4">{{ form.new_spouse_middle_name }}</div>
+                        <div class="col-md-4">{{ form.new_spouse_last_name }}</div>
+                    </div>
+
+                    <div class="row g-1 mt-1 align-items-end spouse_extra" style="display: none;">
+                        <div class="col-md-4">
+                            <label class="form-label small fw-semibold mb-0">Marriage Precision</label>
+                            {{ form.marriage_date_precision }}
+                        </div>
+                        <div class="col-md-4 date-field-wrapper" id="marriage_start_wrapper">
+                            <label class="form-label small fw-semibold mb-0 date-label" id="marriage_start_label">Date</label>
+                            {{ form.marriage_date_start }}
+                        </div>
+                        <div class="col-md-4 date-field-wrapper d-none" id="marriage_year_wrapper">
+                            <label class="form-label small fw-semibold mb-0">Year</label>
+                            {{ form.marriage_year_val }}
+                        </div>
+                        <div class="col-md-4 date-field-wrapper d-none" id="marriage_month_wrapper">
+                            <label class="form-label small fw-semibold mb-0">Year & Month</label>
+                            {{ form.marriage_year_month }}
+                        </div>
+                        <div class="col-md-4 date-field-wrapper d-none" id="marriage_end_wrapper">
+                            <label class="form-label small fw-semibold mb-0 text-danger">End Date</label>
+                            {{ form.marriage_date_end }}
+                        </div>
+
+                        <div class="col-12 mt-1">
+                            <label class="form-label small fw-semibold mb-0">Formatted Date (Read-Only)</label>
+                            {{ form.marriage_date_text }}
+                        </div>
+
+                        <div class="col-12 mt-1">
+                            <label class="form-label small fw-semibold mb-0">Marriage Place</label>
+                            {{ form.marriage_place }}
+                            <div id="marriage_place_map" class="location-map-box mt-1 d-none"></div>
+                            {{ form.marriage_formatted_address }}{{ form.marriage_place_id }}{{ form.marriage_lat }}{{ form.marriage_lng }}
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="py-2 mt-1 border-top d-flex gap-2">
+            <button type="submit" class="btn btn-primary btn-sm px-4" id="btnSubmitForm">
+                <i class="bi bi-check-lg me-1"></i>Save Member Details
+            </button>
+            <a href="{% url 'genealogy:my_tree' %}" class="btn btn-outline-secondary btn-sm">Cancel</a>
+        </div>
+    </form>
+</div>
+
+<!-- TomSelect JS Bundle -->
+<script src="https://cdn.jsdelivr.net/npm/tom-select@2.3.1/dist/js/tom-select.complete.min.js"></script>
+
+<script>
+document.addEventListener("DOMContentLoaded", function () {
+    const MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+    function formatDateDisplay(dateStr) {
+        if (!dateStr) return "";
+        const parts = dateStr.split("-");
+        if (parts.length !== 3) return dateStr;
+        const d = parseInt(parts[2], 10);
+        const m = parseInt(parts[1], 10) - 1;
+        const y = parts[0];
+        return `${String(d).padStart(2, '0')}-${MONTH_NAMES[m]}-${y}`;
+    }
+
+    function formatMonthYearDisplay(ymStr) {
+        if (!ymStr) return "";
+        const parts = ymStr.split("-");
+        if (parts.length !== 2) return ymStr;
+        const m = parseInt(parts[1], 10) - 1;
+        return `${MONTH_NAMES[m]}-${parts[0]}`;
+    }
+
+    // Dynamic Date Block Manager
+    document.querySelectorAll(".date-block-container").forEach(container => {
+        const prefix = container.getAttribute("data-prefix");
+        const precSelect = container.querySelector(".date-precision-select");
+        const startWrapper = document.getElementById(`${prefix}_start_wrapper`);
+        const startLabel = document.getElementById(`${prefix}_start_label`);
+        const startInput = container.querySelector(".date-start-input");
+        const endWrapper = document.getElementById(`${prefix}_end_wrapper`);
+        const endInput = container.querySelector(".date-end-input");
+        const yearWrapper = document.getElementById(`${prefix}_year_wrapper`);
+        const yearInput = container.querySelector(".date-year-input");
+        const monthWrapper = document.getElementById(`${prefix}_month_wrapper`);
+        const monthInput = container.querySelector(".date-month-input");
+        const textDisplay = container.querySelector(".date-display-text");
+
+        function updateDateUIAndText() {
+            const prec = precSelect.value;
+
+            startWrapper.classList.add("d-none");
+            endWrapper.classList.add("d-none");
+            yearWrapper.classList.add("d-none");
+            monthWrapper.classList.add("d-none");
+
+            if (prec === "EXACT") {
+                startWrapper.classList.remove("d-none");
+                startLabel.innerText = "Date";
+            } else if (prec === "YEAR") {
+                yearWrapper.classList.remove("d-none");
+            } else if (prec === "YEAR_MONTH") {
+                monthWrapper.classList.remove("d-none");
+            } else if (prec === "BEFORE" || prec === "AFTER") {
+                startWrapper.classList.remove("d-none");
+                startLabel.innerText = "Reference Date";
+            } else if (prec === "BETWEEN") {
+                startWrapper.classList.remove("d-none");
+                endWrapper.classList.remove("d-none");
+                startLabel.innerText = "Start Date";
+            }
+
+            let generated = "";
+            if (prec === "EXACT" && startInput.value) {
+                generated = formatDateDisplay(startInput.value);
+            } else if (prec === "YEAR" && yearInput.value) {
+                generated = `Year ${yearInput.value}`;
+            } else if (prec === "YEAR_MONTH" && monthInput.value) {
+                generated = formatMonthYearDisplay(monthInput.value);
+            } else if (prec === "BEFORE" && startInput.value) {
+                generated = `Before ${formatDateDisplay(startInput.value)}`;
+            } else if (prec === "AFTER" && startInput.value) {
+                generated = `After ${formatDateDisplay(startInput.value)}`;
+            } else if (prec === "BETWEEN") {
+                const s = formatDateDisplay(startInput.value) || "?";
+                const e = formatDateDisplay(endInput.value) || "?";
+                if (startInput.value || endInput.value) {
+                    generated = `Between ${s} and ${e}`;
+                }
+            }
+
+            textDisplay.value = generated;
+        }
+
+        precSelect.addEventListener("change", updateDateUIAndText);
+        [startInput, endInput, yearInput, monthInput].forEach(inp => {
+            if (inp) inp.addEventListener("input", updateDateUIAndText);
+        });
+
+        updateDateUIAndText();
+    });
+
+    // Name Validation
+    const fnInput = document.getElementById("id_first_name");
+    const mnInput = document.getElementById("id_middle_name");
+    const lnInput = document.getElementById("id_last_name");
+    const counterEl = document.getElementById("nameCounter");
+    const badgeEl = document.getElementById("nameValidBadge");
+
+    function validateLiveNames() {
+        const fn = fnInput.value || "";
+        const mn = mnInput.value || "";
+        const ln = lnInput.value || "";
+        const combined = fn + mn + ln;
+        let alphaCount = 0;
+        for (let i = 0; i < combined.length; i++) {
+            if (/[A-Za-z]/.test(combined[i])) alphaCount++;
+        }
+
+        let isValid = true;
+        let errFn = "", errMn = "", errLn = "";
+
+        if (fn && (/ /.test(fn) || !/^[A-Za-z']+$/.test(fn))) { isValid = false; errFn = "Letters & apostrophe only (no spaces)."; }
+        if (ln && (/ /.test(ln) || !/^[A-Za-z']+$/.test(ln))) { isValid = false; errLn = "Letters & apostrophe only (no spaces)."; }
+        if (mn) {
+            if (mn.startsWith(" ") || mn.endsWith(" ") || / {2,}/.test(mn) || !/^[A-Za-z']+(?: [A-Za-z']+)*$/.test(mn)) {
+                isValid = false; errMn = "Single spaces between words only.";
+            }
+        }
+        if (!fn.trim() && !mn.trim() && !ln.trim()) isValid = false;
+        else if (alphaCount < 4) isValid = false;
+
+        counterEl.innerText = `Combined Letters: ${alphaCount} / 4 min`;
+        badgeEl.className = isValid ? "badge bg-success py-0" : "badge bg-secondary py-0";
+        badgeEl.innerText = isValid ? "Valid Name" : "Incomplete / Invalid";
+
+        document.getElementById("err_first_name").innerText = errFn;
+        fnInput.classList.toggle("is-invalid", !!errFn);
+        document.getElementById("err_middle_name").innerText = errMn;
+        mnInput.classList.toggle("is-invalid", !!errMn);
+        document.getElementById("err_last_name").innerText = errLn;
+        lnInput.classList.toggle("is-invalid", !!errLn);
+    }
+    [fnInput, mnInput, lnInput].forEach(inp => inp && inp.addEventListener("input", validateLiveNames));
+    validateLiveNames();
+
+    // Spouse Toggle
+    const spouseMode = document.getElementById("id_spouse_mode");
+    const existingWrapper = document.getElementById("existing_spouse_wrapper");
+    const newFields = document.querySelectorAll(".new_spouse_fields");
+    const extraFields = document.querySelectorAll(".spouse_extra");
+
+    if (spouseMode) {
+        function checkSpouse() {
+            const val = spouseMode.value;
+            if (existingWrapper) existingWrapper.style.display = (val === "EXISTING") ? "block" : "none";
+            newFields.forEach(el => el.style.display = (val === "NEW") ? "flex" : "none");
+            extraFields.forEach(el => el.style.display = (val !== "NONE") ? "flex" : "none");
+        }
+        spouseMode.addEventListener("change", checkSpouse);
+        checkSpouse();
+    }
+
+    // Photo Preview
+    const photoInput = document.getElementById("id_profile_photo");
+    const photoPreview = document.getElementById("profile_photo_preview");
+    const photoPlaceholder = document.getElementById("profile_photo_placeholder");
+    if (photoInput && photoPreview) {
+        photoInput.addEventListener("change", function (e) {
+            const file = e.target.files[0];
+            if (file) {
+                const reader = new FileReader();
+                reader.onload = function (event) {
+                    photoPreview.src = event.target.result;
+                    photoPreview.classList.remove("d-none");
+                    if (photoPlaceholder) photoPlaceholder.classList.add("d-none");
+                };
+                reader.readAsDataURL(file);
+            }
+        });
+    }
+
+    // Places Focus Map
+    ['birth_place', 'death_place', 'marriage_place'].forEach(prefix => {
+        const input = document.getElementById(`id_${prefix}`);
+        const mapBox = document.getElementById(`${prefix}_map`);
+        if (input && mapBox) {
+            input.addEventListener("focus", () => {
+                mapBox.classList.remove("d-none");
+                if (window.google && window.google.maps) google.maps.event.trigger(mapBox, 'resize');
+            });
+        }
+    });
+
+    // TomSelect with Opposite-Gender Filter
+    const tsConfig = { create: false, maxItems: 1, allowEmptyOption: true, sortField: { field: "text", direction: "asc" } };
+    const selMarriage = document.getElementById("id_parent_marriage");
+    if (selMarriage) new TomSelect(selMarriage, Object.assign({}, tsConfig, { placeholder: "Search marriage..." }));
+    const selFather = document.getElementById("id_assign_father");
+    if (selFather) new TomSelect(selFather, Object.assign({}, tsConfig, { placeholder: "Search father..." }));
+    const selMother = document.getElementById("id_assign_mother");
+    if (selMother) new TomSelect(selMother, Object.assign({}, tsConfig, { placeholder: "Search mother..." }));
+
+    const genderSelect = document.getElementById("id_gender");
+    const existingSpouseSelect = document.getElementById("id_existing_spouse");
+    if (existingSpouseSelect) {
+        const originalOptions = Array.from(existingSpouseSelect.options)
+            .filter(opt => opt.value !== "")
+            .map(opt => ({ value: opt.value, text: opt.text }));
+
+        const spouseTomSelect = new TomSelect(existingSpouseSelect, Object.assign({}, tsConfig, {
+            placeholder: "Search spouse...",
+            options: originalOptions,
+            valueField: "value",
+            labelField: "text",
+            searchField: "text"
+        }));
+
+        function filterSpousesByGender() {
+            const currentGender = genderSelect ? genderSelect.value : "";
+            const targetIcon = currentGender === 'M' ? '♀' : (currentGender === 'F' ? '♂' : null);
+            spouseTomSelect.clear();
+            spouseTomSelect.clearOptions();
+            const filtered = originalOptions.filter(opt => !targetIcon || opt.text.includes(targetIcon));
+            spouseTomSelect.addOptions(filtered);
+            spouseTomSelect.refreshOptions(false);
+        }
+
+        if (genderSelect) genderSelect.addEventListener("change", filterSpousesByGender);
+        filterSpousesByGender();
+    }
+});
+
+window.initIndividualPlaces = function() {
+    if (!window.google || !google.maps || !google.maps.places) return;
+
+    const geocoder = new google.maps.Geocoder();
+    const sections = [
+        { prefix: 'birth', input: document.getElementById('id_birth_place'), mapEl: document.getElementById('birth_place_map'), idInput: document.getElementById('id_birth_place_id'), addrInput: document.getElementById('id_birth_formatted_address'), latInput: document.getElementById('id_birth_lat'), lngInput: document.getElementById('id_birth_lng') },
+        { prefix: 'death', input: document.getElementById('id_death_place'), mapEl: document.getElementById('death_place_map'), idInput: document.getElementById('id_death_place_id'), addrInput: document.getElementById('id_death_formatted_address'), latInput: document.getElementById('id_death_lat'), lngInput: document.getElementById('id_death_lng') },
+        { prefix: 'marriage', input: document.getElementById('id_marriage_place'), mapEl: document.getElementById('marriage_place_map'), idInput: document.getElementById('id_marriage_place_id'), addrInput: document.getElementById('id_marriage_formatted_address'), latInput: document.getElementById('id_marriage_lat'), lngInput: document.getElementById('id_marriage_lng') }
+    ];
+
+    sections.forEach(sec => {
+        if (!sec.input || !sec.mapEl) return;
+
+        const curLat = parseFloat(sec.latInput ? sec.latInput.value : '');
+        const curLng = parseFloat(sec.lngInput ? sec.lngInput.value : '');
+        const hasCoords = !isNaN(curLat) && !isNaN(curLng);
+
+        if (hasCoords) sec.mapEl.classList.remove("d-none");
+
+        const initialCenter = hasCoords ? { lat: curLat, lng: curLng } : { lat: 20.0, lng: 0.0 };
+        const map = new google.maps.Map(sec.mapEl, { center: initialCenter, zoom: hasCoords ? 14 : 2, mapTypeControl: false, streetViewControl: false });
+        let marker = hasCoords ? new google.maps.Marker({ position: initialCenter, map: map }) : null;
+
+        function updateFieldsAndMarker(lat, lng, formattedAddress, placeId, originalName) {
+            if (sec.input) sec.input.value = originalName || formattedAddress || sec.input.value;
+            if (sec.idInput) sec.idInput.value = placeId || '';
+            if (sec.addrInput) sec.addrInput.value = formattedAddress || '';
+            if (sec.latInput) sec.latInput.value = lat.toFixed(7);
+            if (sec.lngInput) sec.lngInput.value = lng.toFixed(7);
+
+            const pos = new google.maps.LatLng(lat, lng);
+            map.setCenter(pos);
+            map.setZoom(14);
+            if (!marker) marker = new google.maps.Marker({ position: pos, map: map });
+            else marker.setPosition(pos);
+        }
+
+        sec.input.addEventListener('keydown', e => { if (e.key === 'Enter') e.preventDefault(); });
+        const autocomplete = new google.maps.places.Autocomplete(sec.input, { fields: ['place_id', 'formatted_address', 'geometry', 'name'] });
+
+        autocomplete.addListener('place_changed', () => {
+            const place = autocomplete.getPlace();
+            if (!place || !place.geometry || !place.geometry.location) return;
+            sec.mapEl.classList.remove("d-none");
+            updateFieldsAndMarker(place.geometry.location.lat(), place.geometry.location.lng(), place.formatted_address, place.place_id, place.name);
+        });
+
+        map.addListener('click', (e) => {
+            const lat = e.latLng.lat();
+            const lng = e.latLng.lng();
+            geocoder.geocode({ location: { lat: lat, lng: lng } }, (results, status) => {
+                if (status === 'OK' && results[0]) {
+                    updateFieldsAndMarker(lat, lng, results[0].formatted_address, results[0].place_id, results[0].formatted_address);
+                }
+            });
+        });
+    });
+};
+
+(function loadPlacesScript() {
+    if (window.google && window.google.maps && window.google.maps.places) {
+        window.initIndividualPlaces();
+        return;
+    }
+    const apiKey = "{{ GOOGLE_MAPS_API_KEY|default:'' }}";
+    if (!apiKey) return;
+    if (!document.querySelector('script[src*="maps.googleapis.com"]')) {
+        const script = document.createElement('script');
+        script.src = `https://maps.googleapis.com/maps/api/js?key=${apiKey}&libraries=places&callback=initIndividualPlaces`;
+        script.async = true;
+        script.defer = true;
+        document.head.appendChild(script);
+    }
+})();
+</script>
+{% endblock %}

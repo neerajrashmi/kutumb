@@ -1,0 +1,198 @@
+{% extends "base.html" %}
+
+{% block title %}Executive Family Dashboard &mdash; Ancestry{% endblock %}
+
+{% block content %}
+<div class="container py-4" style="max-width: 1100px;">
+    <!-- Welcome Header & Anchor Node Banner -->
+    <div class="d-flex justify-content-between align-items-center mb-4 pb-2 border-bottom">
+        <div>
+            <h3 class="fw-bold mb-1 text-primary">
+                <i class="bi bi-speedometer2 me-2"></i>Executive Family Dashboard
+            </h3>
+            <span class="text-muted small">
+                Logged in as <strong>{{ user.pk }}</strong> &bull; 
+                {% if user_individual %}
+                    Anchor Member: <strong>{{ user_individual.name }}</strong> ({{ user_individual.individual_id }})
+                {% else %}
+                    Anchor Member: <em>System Root</em>
+                {% endif %}
+            </span>
+        </div>
+        <div class="d-flex gap-2">
+            {% if user_individual %}
+                <a href="{% url 'genealogy:individual_tree' user_individual.individual_id %}" class="btn btn-outline-primary btn-sm">
+                    <i class="bi bi-diagram-3 me-1"></i>My Family Tree
+                </a>
+                <a href="{% url 'contacts:manage_contacts' user_individual.individual_id %}" class="btn btn-outline-secondary btn-sm">
+                    <i class="bi bi-telephone me-1"></i>My Contacts
+                </a>
+            {% else %}
+                <a href="{% url 'genealogy:my_tree' %}" class="btn btn-outline-primary btn-sm">
+                    <i class="bi bi-diagram-3 me-1"></i>View Tree
+                </a>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- 1. Platform Metrics Ribbon -->
+    <div class="row g-3 mb-4">
+        <div class="col-md-4">
+            <div class="card border-0 shadow-sm bg-primary text-white h-100">
+                <div class="card-body d-flex justify-content-between align-items-center p-3">
+                    <div>
+                        <div class="text-uppercase small fw-bold opacity-75">Family Members</div>
+                        <h2 class="display-6 fw-bold mb-0">{{ total_individuals }}</h2>
+                    </div>
+                    <i class="bi bi-people-fill fs-1 opacity-50"></i>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-4">
+            <div class="card border-0 shadow-sm bg-success text-white h-100">
+                <div class="card-body d-flex justify-content-between align-items-center p-3">
+                    <div>
+                        <div class="text-uppercase small fw-bold opacity-75">Marriage Unions</div>
+                        <h2 class="display-6 fw-bold mb-0">{{ total_marriages }}</h2>
+                    </div>
+                    <i class="bi bi-heart-fill fs-1 opacity-50"></i>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-4">
+            <div class="card border-0 shadow-sm bg-info text-white h-100">
+                <div class="card-body d-flex justify-content-between align-items-center p-3">
+                    <div>
+                        <div class="text-uppercase small fw-bold opacity-75">Archived Photos</div>
+                        <h2 class="display-6 fw-bold mb-0">{{ total_photos }}</h2>
+                    </div>
+                    <i class="bi bi-images fs-1 opacity-50"></i>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="row g-4">
+        <!-- 2. Recent Family Members Activity -->
+        <div class="col-lg-8">
+            <div class="card shadow-sm border-0 h-100">
+                <div class="card-header bg-white py-3 d-flex justify-content-between align-items-center">
+                    <h5 class="fw-bold mb-0 text-secondary">
+                        <i class="bi bi-clock-history me-2"></i>Recently Added Members
+                    </h5>
+                    <a href="{% url 'genealogy:my_tree' %}" class="btn btn-sm btn-outline-secondary">Open Full Tree</a>
+                </div>
+                <div class="card-body p-0">
+                    <div class="table-responsive">
+                        <table class="table table-hover align-middle mb-0">
+                            <thead class="table-light small text-uppercase">
+                                <tr>
+                                    <th class="ps-3">ID</th>
+                                    <th>Name</th>
+                                    <th>Gender</th>
+                                    <th>Lineage Union</th>
+                                    <th class="text-end pe-3">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for member in recent_members %}
+                                    <tr>
+                                        <td class="ps-3"><code>{{ member.individual_id }}</code></td>
+                                        <td class="fw-semibold">
+                                            {{ member.name }}
+                                        </td>
+                                        <td>
+                                            {% if member.gender == 'M' %}
+                                                <span class="badge bg-primary">♂ Male</span>
+                                            {% elif member.gender == 'F' %}
+                                                <span class="badge bg-danger">♀ Female</span>
+                                            {% else %}
+                                                <span class="badge bg-secondary">Other</span>
+                                            {% endif %}
+                                        </td>
+                                        <td>
+                                            {% if member.parent_marriage %}
+                                                <span class="badge bg-light text-dark border">{{ member.parent_marriage.marriage_id }}</span>
+                                            {% else %}
+                                                <span class="badge bg-secondary">Root / Unattached</span>
+                                            {% endif %}
+                                        </td>
+                                        <td class="text-end pe-3">
+                                            <a href="{% url 'genealogy:individual_edit' member.individual_id %}" class="btn btn-xs btn-outline-primary py-0 px-2 small">
+                                                Edit
+                                            </a>
+                                            <a href="{% url 'genealogy:individual_tree' member.individual_id %}" class="btn btn-xs btn-outline-secondary py-0 px-2 small">
+                                                Tree
+                                            </a>
+                                        </td>
+                                    </tr>
+                                {% empty %}
+                                    <tr>
+                                        <td colspan="5" class="text-center py-4 text-muted">
+                                            No family members recorded yet.
+                                        </td>
+                                    </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 3. Quick Navigation & Family Operations Hub -->
+        <div class="col-lg-4">
+            <div class="card shadow-sm border-0 mb-3">
+                <div class="card-header bg-white py-3">
+                    <h5 class="fw-bold mb-0 text-secondary">
+                        <i class="bi bi-grid-fill me-2"></i>Navigation Hub
+                    </h5>
+                </div>
+                <div class="card-body d-flex flex-column gap-2">
+                    <a href="{% url 'genealogy:my_tree' %}" class="btn btn-outline-primary text-start d-flex align-items-center justify-content-between p-2">
+                        <div>
+                            <strong><i class="bi bi-diagram-3-fill me-2"></i>Interactive Family Tree</strong>
+                            <div class="small text-muted">Navigate generations, parents & children</div>
+                        </div>
+                        <i class="bi bi-chevron-right text-muted"></i>
+                    </a>
+
+                    <a href="{% url 'accounts:access_dashboard' %}" class="btn btn-outline-secondary text-start d-flex align-items-center justify-content-between p-2">
+                        <div>
+                            <strong><i class="bi bi-shield-lock-fill me-2"></i>Access & Privacy Grants</strong>
+                            <div class="small text-muted">Manage protected data permissions</div>
+                        </div>
+                        <i class="bi bi-chevron-right text-muted"></i>
+                    </a>
+
+                    <a href="{% url 'accounts:invite_member' %}" class="btn btn-outline-secondary text-start d-flex align-items-center justify-content-between p-2">
+                        <div>
+                            <strong><i class="bi bi-envelope-plus-fill me-2"></i>Invite Relative</strong>
+                            <div class="small text-muted">Invite a relative to register their account</div>
+                        </div>
+                        <i class="bi bi-chevron-right text-muted"></i>
+                    </a>
+
+                    {% if user_individual %}
+                        <a href="{% url 'contacts:manage_contacts' user_individual.individual_id %}" class="btn btn-outline-secondary text-start d-flex align-items-center justify-content-between p-2">
+                            <div>
+                                <strong><i class="bi bi-telephone-fill me-2"></i>Manage My Contacts</strong>
+                                <div class="small text-muted">Physical addresses, phones & emails</div>
+                            </div>
+                            <i class="bi bi-chevron-right text-muted"></i>
+                        </a>
+                    {% endif %}
+                </div>
+            </div>
+
+            <!-- Helpful Guidance Box -->
+            <div class="alert alert-light border small text-muted p-3 mb-0">
+                <div class="fw-bold text-dark mb-1"><i class="bi bi-info-circle-fill text-primary me-1"></i>Adding Relatives</div>
+                New members and marriages cannot be created in isolation. Open any member in the <strong>Family Tree</strong> to add children to a union or record a new spouse.
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

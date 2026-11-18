@@ -1,0 +1,111 @@
+{% extends "base.html" %}
+
+{% block title %}{{ title }}{% endblock %}
+
+{% block content %}
+<div class="container py-4" style="max-width: 720px;">
+    <div class="card shadow-sm border-0">
+        <div class="card-body p-4">
+            <h4 class="card-title text-primary fw-bold mb-4">
+                <i class="bi bi-camera-fill me-2"></i>{{ title }}
+            </h4>
+
+            {% if form.non_field_errors %}
+                <div class="alert alert-danger">
+                    {% for error in form.non_field_errors %}{{ error }}<br>{% endfor %}
+                </div>
+            {% endif %}
+
+            <form method="post" enctype="multipart/form-data" novalidate>
+                {% csrf_token %}
+
+                <!-- 1. Compulsory Linkage Target -->
+                <h6 class="border-bottom pb-2 mb-3 text-secondary">1. Compulsory Association (Individual XOR Marriage)</h6>
+                <div class="row g-3 mb-3">
+                    <div class="col-md-4">
+                        <label class="form-label fw-semibold">Association Type</label>
+                        {{ form.target_type }}
+                    </div>
+                    <div class="col-md-8" id="individual_target_wrapper">
+                        <label class="form-label fw-semibold">Target Individual</label>
+                        {{ form.individual }}
+                    </div>
+                    <div class="col-md-8" id="marriage_target_wrapper" style="display: none;">
+                        <label class="form-label fw-semibold">Target Marriage</label>
+                        {{ form.marriage }}
+                    </div>
+                </div>
+
+                <!-- 2. Occasion & Event Linkage -->
+                <h6 class="border-bottom pb-2 mt-4 mb-3 text-secondary">2. Occasion & Event Linkage</h6>
+                <div class="row g-3 mb-3">
+                    <div class="col-md-6">
+                        <label class="form-label fw-semibold">{{ form.occasion.label }}</label>
+                        {{ form.occasion }}
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label fw-semibold">{{ form.new_occasion_name.label }}</label>
+                        {{ form.new_occasion_name }}
+                    </div>
+                </div>
+
+                <!-- 3. Photo Binary & Profile Designation -->
+                <h6 class="border-bottom pb-2 mt-4 mb-3 text-secondary">3. Upload File & Metadata</h6>
+                <div class="row g-3">
+                    <div class="col-12">
+                        <label class="form-label fw-semibold">Select Photo File</label>
+                        {{ form.image_file }}
+                    </div>
+                    <div class="col-12" id="profile_photo_wrapper">
+                        <div class="form-check mt-1">
+                            {{ form.is_profile_photo }}
+                            <label class="form-check-label fw-semibold text-primary">{{ form.is_profile_photo.label }}</label>
+                        </div>
+                    </div>
+                    <div class="col-12">
+                        <label class="form-label fw-semibold">Caption</label>
+                        {{ form.caption }}
+                    </div>
+                    <div class="col-12">
+                        <label class="form-label fw-semibold">Description</label>
+                        {{ form.description }}
+                    </div>
+                </div>
+
+                <div class="d-flex gap-2 mt-4 pt-3 border-top">
+                    <button type="submit" class="btn btn-primary px-4"><i class="bi bi-cloud-arrow-up me-1"></i>Upload Photo</button>
+                    <a href="{% url 'genealogy:my_tree' %}" class="btn btn-outline-secondary">Cancel</a>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<script>
+document.addEventListener("DOMContentLoaded", function() {
+    const targetType = document.getElementById('id_target_type');
+    const indWrapper = document.getElementById('individual_target_wrapper');
+    const marWrapper = document.getElementById('marriage_target_wrapper');
+    const profWrapper = document.getElementById('profile_photo_wrapper');
+
+    function checkTarget() {
+        if (!targetType) return;
+        const val = targetType.value;
+        if (val === 'INDIVIDUAL') {
+            indWrapper.style.display = 'block';
+            marWrapper.style.display = 'none';
+            profWrapper.style.display = 'block';
+        } else {
+            indWrapper.style.display = 'none';
+            marWrapper.style.display = 'block';
+            profWrapper.style.display = 'none';
+            const profCheck = document.getElementById('id_is_profile_photo');
+            if (profCheck) profCheck.checked = false;
+        }
+    }
+
+    targetType.addEventListener('change', checkTarget);
+    checkTarget();
+});
+</script>
+{% endblock %}

@@ -1,0 +1,141 @@
+{% extends "base.html" %}
+
+{% block title %}{{ title }}{% endblock %}
+
+{% block extra_css %}
+<style>
+    .pac-container {
+        z-index: 99999 !important;
+        border-radius: 6px;
+        box-shadow: 0 8px 16px rgba(0,0,0,0.15);
+        border: 1px solid #cbd5e1;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container py-4">
+    <div class="card shadow-sm border-0 mx-auto" style="max-width: 850px;">
+        <div class="card-body p-4">
+            <h3 class="card-title text-primary fw-bold mb-4">
+                <i class="bi bi-heart-half me-2"></i>{{ title }}
+            </h3>
+
+            {% if form.non_field_errors %}
+                <div class="alert alert-danger">
+                    {% for error in form.non_field_errors %}{{ error }}<br>{% endfor %}
+                </div>
+            {% endif %}
+
+            <form method="post" novalidate>
+                {% csrf_token %}
+
+                <!-- 1. Participants -->
+                <h5 class="border-bottom pb-2 mb-3 text-secondary">1. Spousal Participants</h5>
+                <div class="row g-3 mb-4">
+                    <div class="col-md-6">
+                        <label class="form-label fw-semibold">Male Partner</label>
+                        {{ form.male_member }}
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label fw-semibold">Female Partner</label>
+                        {{ form.female_member }}
+                    </div>
+                </div>
+
+                <!-- 2. Marriage Event Details -->
+                <h5 class="border-bottom pb-2 mb-3 text-secondary">2. Marriage Event (Date & Place)</h5>
+                <div class="row g-3 mb-4">
+                    <div class="col-md-6">
+                        <label class="form-label fw-semibold">Marriage Date (Description)</label>
+                        {{ form.marriage_date_text }}
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label fw-semibold">Precision</label>
+                        {{ form.marriage_date_precision }}
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label fw-semibold">Qualifier</label>
+                        {{ form.marriage_date_qualifier }}
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label fw-semibold">Calendar Date (Start)</label>
+                        {{ form.marriage_date_start }}
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label fw-semibold">End Date (If Between)</label>
+                        {{ form.marriage_date_end }}
+                    </div>
+                    <div class="col-12">
+                        <label class="form-label fw-semibold">Marriage Place (Google Search Enabled)</label>
+                        {{ form.marriage_location_text }}
+                    </div>
+                </div>
+
+                <!-- 3. Separation Event -->
+                <h5 class="border-bottom pb-2 mb-3 text-secondary">3. Separation Event (If Ended)</h5>
+                <div class="row g-3 mb-4">
+                    <div class="col-md-6">
+                        <label class="form-label fw-semibold">Separation Date (Description)</label>
+                        {{ form.separation_date_text }}
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label fw-semibold">Separation Date (Calendar)</label>
+                        {{ form.separation_date_start }}
+                    </div>
+                    <div class="col-md-12">
+                        <label class="form-label fw-semibold">Separation Reason</label>
+                        {{ form.separation_reason }}
+                        <small class="text-muted">Leave empty if the marriage is ongoing.</small>
+                    </div>
+                </div>
+
+                <div class="d-flex gap-2 pt-3 border-top">
+                    <button type="submit" class="btn btn-primary px-4"><i class="bi bi-check-lg me-1"></i>Save Marriage</button>
+                    <a href="{% url 'genealogy:my_tree' %}" class="btn btn-outline-secondary">Cancel</a>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<script>
+window.initMarriagePlaces = function() {
+    if (!window.google || !google.maps || !google.maps.places) return;
+    const inputEl = document.getElementById('id_marriage_location_text');
+    if (!inputEl) return;
+
+    inputEl.addEventListener('keydown', function(e) {
+        if (e.key === 'Enter') e.preventDefault();
+    });
+
+    const autocomplete = new google.maps.places.Autocomplete(inputEl, {
+        fields: ['formatted_address', 'name']
+    });
+
+    autocomplete.addListener('place_changed', function() {
+        const place = autocomplete.getPlace();
+        if (place) {
+            inputEl.value = place.formatted_address || place.name || inputEl.value;
+        }
+    });
+};
+
+(function loadPlacesScript() {
+    if (window.google && window.google.maps && window.google.maps.places) {
+        window.initMarriagePlaces();
+        return;
+    }
+    const apiKey = "{{ GOOGLE_MAPS_API_KEY|default:google_maps_api_key }}";
+    if (!apiKey) return;
+
+    if (!document.querySelector('script[src*="maps.googleapis.com"]')) {
+        const script = document.createElement('script');
+        script.src = `https://maps.googleapis.com/maps/api/js?key=${apiKey}&libraries=places&callback=initMarriagePlaces`;
+        script.async = true;
+        script.defer = true;
+        document.head.appendChild(script);
+    }
+})();
+</script>
+{% endblock %}
