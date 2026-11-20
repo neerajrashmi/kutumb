@@ -154,5 +154,12 @@ def get_user_individual_permissions(requesting_user_id: str, target_individual_i
 
 def has_protected_read_access(requesting_user_id: str, target_individual_id: str) -> bool:
     """Helper returning whether requesting_user has read access to protected dates/locations."""
+    target = IndividualDetail.objects.filter(pk=target_individual_id).only('individual_id', 'created_by').first()
+    if not target:
+        return False
+
+    # Grant automatic read/edit access to the creator of the record
+    if str(target.created_by) == str(requesting_user_id):
+        return True
     can_view, _ = get_user_individual_permissions(requesting_user_id, target_individual_id)
     return can_view
