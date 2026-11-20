@@ -2,7 +2,7 @@
 from datetime import date
 from django.db import models
 from django.utils import timezone
-
+from common.middleware import get_current_user_id
 
 class TimeStampedModel(models.Model):
     created_by = models.CharField(max_length=8, null=True, blank=True)
@@ -12,7 +12,15 @@ class TimeStampedModel(models.Model):
 
     class Meta:
         abstract = True
+    def save(self, *args, **kwargs):
+        current_user_id = get_current_user_id()
 
+        if current_user_id:
+            if self._state.adding or not self.created_by:
+                self.created_by = current_user_id
+            self.modified_by = current_user_id
+
+        super().save(*args, **kwargs)
 
 class IdSequence(models.Model):
     sequence_type = models.CharField(max_length=20, primary_key=True, db_column='Sequence_Type')
