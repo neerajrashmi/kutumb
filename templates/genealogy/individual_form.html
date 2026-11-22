@@ -66,6 +66,7 @@
     <form method="post" enctype="multipart/form-data" novalidate id="individualForm">
         {% csrf_token %}
         <input type="hidden" name="parent_marriage_id" value="{{ parent_marriage_id|default:'' }}">
+        {{ form.target_spouse_marriage_id }}
 
         <div class="row g-2">
             <!-- ============================================================== -->
@@ -343,6 +344,18 @@
                                                     <a href="{% url 'genealogy:individual_tree' m_item.spouse.individual_id %}" class="bg-secondary text-white">Tree</a>
                                                 </div>
                                             </div>
+                                        {% else %}
+                                            <div class="border border-dashed rounded p-2 bg-light d-flex justify-content-between align-items-center mb-2">
+                                                <span class="text-muted small">
+                                                    <i class="bi bi-person-dash me-1"></i>
+                                                    Spouse not recorded for <strong>{{ m_item.marriage.marriage_id }}</strong>
+                                                </span>
+                                                <button type="button"
+                                                        class="btn btn-outline-primary btn-sm py-0 px-2"
+                                                        onclick="completeMarriageSpouse('{{ m_item.marriage.marriage_id }}')">
+                                                    + Add Spouse to {{ m_item.marriage.marriage_id }}
+                                                </button>
+                                            </div>
                                         {% endif %}
 
                                         <!-- Children -->
@@ -381,8 +394,11 @@
                 {% endif %}
 
                 <!-- 6. Marriage / Spouse Block -->
-                <div class="compact-card p-2 mb-2 date-block-container" data-prefix="marriage">
-                    <div class="section-title mb-2">6. Record New / Additional Spouse</div>
+                <div class="compact-card p-2 mb-2 date-block-container" data-prefix="marriage" id="spouseMarriageBlock">
+                    <div class="d-flex justify-content-between align-items-center border-bottom pb-1 mb-2">
+                        <span class="section-title border-0 pb-0 mb-0" id="spouseSectionTitle">6. Record New / Additional Spouse</span>
+                        <span class="badge bg-primary d-none" id="completingMarriageBadge"></span>
+                    </div>
                     <div class="row g-1">
                         <div class="col-md-6">
                             <label class="form-label small fw-semibold mb-0">Spouse Mode</label>
@@ -451,6 +467,32 @@
 <script src="https://cdn.jsdelivr.net/npm/tom-select@2.3.1/dist/js/tom-select.complete.min.js"></script>
 
 <script>
+function completeMarriageSpouse(marriageId) {
+    const targetInput = document.getElementById('id_target_spouse_marriage_id');
+    const spouseMode = document.getElementById('id_spouse_mode');
+    const titleEl = document.getElementById('spouseSectionTitle');
+    const badgeEl = document.getElementById('completingMarriageBadge');
+    const blockEl = document.getElementById('spouseMarriageBlock');
+
+    if (targetInput) {
+        targetInput.value = marriageId;
+    }
+    if (titleEl) {
+        titleEl.innerText = `6. Complete Union ${marriageId} (Add Missing Spouse)`;
+    }
+    if (badgeEl) {
+        badgeEl.innerText = `Updating ${marriageId}`;
+        badgeEl.classList.remove('d-none');
+    }
+    if (spouseMode) {
+        spouseMode.value = 'NEW';
+        spouseMode.dispatchEvent(new Event('change'));
+    }
+    if (blockEl) {
+        blockEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+}
+
 document.addEventListener("DOMContentLoaded", function () {
     const MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 

@@ -75,7 +75,8 @@ class IndividualCompositeForm(forms.ModelForm):
     death_lat = forms.CharField(required=False, widget=forms.TextInput(attrs={'class': 'd-none', 'id': 'id_death_lat'}))
     death_lng = forms.CharField(required=False, widget=forms.TextInput(attrs={'class': 'd-none', 'id': 'id_death_lng'}))
 
-    # 4. Spouse & Marriage Block (Contextual creation)
+    # 4. Spouse & Marriage Block (Contextual creation or completing incomplete marriage)
+    target_spouse_marriage_id = forms.CharField(required=False, widget=forms.HiddenInput(attrs={'id': 'id_target_spouse_marriage_id'}))
     add_spouse_mode = forms.ChoiceField(choices=[('NONE', 'None'), ('EXISTING', 'Existing Member'), ('NEW', 'Quick-Add New Spouse')], initial='NONE', widget=forms.Select(attrs={'class': 'form-select form-select-sm', 'id': 'id_spouse_mode'}))
     existing_spouse = DescriptiveIndividualChoiceField(queryset=IndividualDetail.objects.none(), required=False, widget=forms.Select(attrs={'class': 'form-select form-select-sm', 'id': 'id_existing_spouse'}))
     new_spouse_first_name = forms.CharField(max_length=100, required=False, widget=forms.TextInput(attrs={'class': 'form-control form-control-sm', 'placeholder': 'Spouse First Name'}))
@@ -103,9 +104,12 @@ class IndividualCompositeForm(forms.ModelForm):
         super().__init__(*args, **kwargs)
         all_inds = IndividualDetail.objects.all().order_by('first_name', 'last_name')
         self.is_gender_locked = False
+        self._original_parent_marriage_id = None
         current_gender = None
 
         if self.instance and self.instance.pk:
+            # Capture original parent_marriage_id BEFORE form.is_valid() / _post_clean() can overwrite self.instance.parent_marriage
+            self._original_parent_marriage_id = self.instance.parent_marriage_id
             all_inds = all_inds.exclude(pk=self.instance.pk)
             current_gender = self.instance.gender
             has_marriage = MarriageDetail.objects.filter(
@@ -114,6 +118,13 @@ class IndividualCompositeForm(forms.ModelForm):
             if has_marriage:
                 self.is_gender_locked = True
                 self.fields['gender'].disabled = True
+
+            # Pre-fill assign_father / assign_mother from existing parent_marriage if present
+            if self.instance.parent_marriage:
+                if self.instance.parent_marriage.male_member:
+                    self.fields['assign_father'].initial = self.instance.parent_marriage.male_member
+                if self.instance.parent_marriage.female_member:
+                    self.fields['assign_mother'].initial = self.instance.parent_marriage.female_member
 
         self.fields['assign_father'].queryset = all_inds.filter(gender='M')
         self.fields['assign_mother'].queryset = all_inds.filter(gender='F')
@@ -174,6 +185,7 @@ class IndividualCompositeForm(forms.ModelForm):
 
         if self.instance and self.instance.pk:
             is_already_connected = (
+                self._original_parent_marriage_id is not None or
                 self.instance.parent_marriage_id is not None or
                 MarriageDetail.objects.filter(
                     Q(male_member_id=self.instance.pk) | Q(female_member_id=self.instance.pk)
@@ -197,6 +209,11 @@ class IndividualCompositeForm(forms.ModelForm):
 
     @transaction.atomic
     def save(self, commit=True, user_id=None, locked_parent_marriage=None):
+        # Retrieve original parent_marriage captured in __init__ BEFORE ModelForm._post_clean() cleared it
+        existing_pm = None
+        if self._original_parent_marriage_id:
+            existing_pm = MarriageDetail.objects.filter(pk=self._original_parent_marriage_id).first()
+
         individual = super().save(commit=False)
         if self.instance and self.instance.pk and self.is_gender_locked:
             individual.gender = self.instance.gender
@@ -235,7 +252,7 @@ class IndividualCompositeForm(forms.ModelForm):
         elif individual.death_location and not d_place:
             individual.death_location = None
 
-        # 3. Direct Father / Mother Assignment
+        # 3. Direct Father / Mother Assignment (reuses & completes existing single-parent union)
         father = self.cleaned_data.get('assign_father')
         new_f_name = self.cleaned_data.get('new_father_name')
         if not father and new_f_name:
@@ -248,21 +265,67 @@ class IndividualCompositeForm(forms.ModelForm):
             parts = new_m_name.strip().split()
             mother = IndividualDetail.objects.create(first_name=parts[0], last_name=parts[-1] if len(parts) > 1 else "", gender='F')
 
-        p_marriage = locked_parent_marriage or self.cleaned_data.get('parent_marriage')
-        if p_marriage:
-            individual.parent_marriage = p_marriage
-        elif father or mother:
-            if father and mother:
-                pm = MarriageDetail.objects.filter(male_member=father, female_member=mother).first()
-                if not pm:
-                    pm = MarriageDetail.objects.create(male_member=father, female_member=mother)
-                individual.parent_marriage = pm
-            elif father:
-                pm = MarriageDetail.objects.filter(male_member=father, female_member__isnull=True).first() or MarriageDetail.objects.create(male_member=father)
-                individual.parent_marriage = pm
-            elif mother:
-                pm = MarriageDetail.objects.filter(female_member=mother, male_member__isnull=True).first() or MarriageDetail.objects.create(female_member=mother)
-                individual.parent_marriage = pm
+        # Target union may come from locked_parent_marriage, the parent_marriage dropdown, or existing_pm
+        target_pm = locked_parent_marriage or self.cleaned_data.get('parent_marriage') or existing_pm
+
+        if father or mother:
+            pm = None
+
+            # 3a. Reuse and complete target_pm (e.g., M0000011) if it is missing one parent or already matches
+            if target_pm:
+                father_matches = (not target_pm.male_member_id) or (not father) or (target_pm.male_member_id == father.pk)
+                mother_matches = (not target_pm.female_member_id) or (not mother) or (target_pm.female_member_id == mother.pk)
+
+                if father_matches and mother_matches:
+                    effective_father = father or target_pm.male_member
+                    effective_mother = mother or target_pm.female_member
+
+                    full_dup = None
+                    if effective_father and effective_mother:
+                        full_dup = MarriageDetail.objects.filter(
+                            male_member=effective_father,
+                            female_member=effective_mother
+                        ).exclude(pk=target_pm.pk).first()
+
+                    if full_dup:
+                        pm = full_dup
+                        if not target_pm.children.exclude(pk=individual.pk).exists():
+                            target_pm.delete()
+                    else:
+                        updated = False
+                        if father and not target_pm.male_member_id:
+                            target_pm.male_member = father
+                            updated = True
+                        if mother and not target_pm.female_member_id:
+                            target_pm.female_member = mother
+                            updated = True
+                        if updated:
+                            target_pm.save()
+                        pm = target_pm
+
+            # 3b. Otherwise look up an existing union for these parents or create a new one
+            if not pm:
+                if father and mother:
+                    pm = MarriageDetail.objects.filter(male_member=father, female_member=mother).first()
+                    if not pm:
+                        pm = (
+                            MarriageDetail.objects.filter(male_member=father, female_member__isnull=True).first()
+                            or MarriageDetail.objects.filter(female_member=mother, male_member__isnull=True).first()
+                        )
+                        if pm:
+                            pm.male_member = father
+                            pm.female_member = mother
+                            pm.save()
+                        else:
+                            pm = MarriageDetail.objects.create(male_member=father, female_member=mother)
+                elif father:
+                    pm = MarriageDetail.objects.filter(male_member=father, female_member__isnull=True).first() or MarriageDetail.objects.create(male_member=father)
+                elif mother:
+                    pm = MarriageDetail.objects.filter(female_member=mother, male_member__isnull=True).first() or MarriageDetail.objects.create(female_member=mother)
+
+            individual.parent_marriage = pm
+        elif target_pm:
+            individual.parent_marriage = target_pm
 
         if commit:
             individual.save()
@@ -279,7 +342,7 @@ class IndividualCompositeForm(forms.ModelForm):
                 file_size_bytes=photo_file.size
             )
 
-        # 5. Spouse & Marriage
+        # 5. Spouse & Marriage (supports completing an incomplete marriage OR creating a new one)
         spouse_obj = None
         spouse_mode = self.cleaned_data.get('add_spouse_mode')
         if spouse_mode == 'EXISTING':
@@ -309,8 +372,38 @@ class IndividualCompositeForm(forms.ModelForm):
 
             male = individual if individual.gender == 'M' else spouse_obj
             female = spouse_obj if individual.gender == 'M' else individual
-            if not MarriageDetail.objects.filter(male_member=male, female_member=female).exists():
-                MarriageDetail.objects.create(male_member=male, female_member=female, marriage_date=m_date, marriage_location=m_loc)
+
+            target_m_id = (self.cleaned_data.get('target_spouse_marriage_id') or '').strip()
+            target_marriage = MarriageDetail.objects.filter(pk=target_m_id).first() if target_m_id else None
+
+            if target_marriage and (
+                (target_marriage.male_member_id == individual.pk and not target_marriage.female_member_id) or
+                (target_marriage.female_member_id == individual.pk and not target_marriage.male_member_id)
+            ):
+                # Complete the existing incomplete marriage (e.g., M0000007)
+                existing_pair = MarriageDetail.objects.filter(
+                    male_member=male, female_member=female
+                ).exclude(pk=target_marriage.pk).first()
+
+                if existing_pair:
+                    IndividualDetail.objects.filter(parent_marriage=target_marriage).update(parent_marriage=existing_pair)
+                    target_marriage.delete()
+                else:
+                    target_marriage.male_member = male
+                    target_marriage.female_member = female
+                    if m_date:
+                        target_marriage.marriage_date = m_date
+                    if m_loc:
+                        target_marriage.marriage_location = m_loc
+                    target_marriage.save()
+            else:
+                if not MarriageDetail.objects.filter(male_member=male, female_member=female).exists():
+                    MarriageDetail.objects.create(
+                        male_member=male,
+                        female_member=female,
+                        marriage_date=m_date,
+                        marriage_location=m_loc
+                    )
 
         return individual
 
