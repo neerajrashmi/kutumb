@@ -4,8 +4,13 @@ Comprehensive Genealogy Tree Service for ancestry traversal, multi-spouse serial
 collateral paternal/maternal uncle & aunt branches, and privacy-aware graph generation.
 """
 from datetime import date
-from typing import List, Optional, Set
-from django.db import models
+import re
+from typing import List, Optional
+import urllib.parse
+import urllib.request
+import json
+
+from django.conf import settings
 from django.db.models import Q
 
 from genealogy.models import IndividualDetail, MarriageDetail
@@ -19,6 +24,71 @@ class GenealogyTreeService:
     Enforces SRS Section 5 (unbounded recursion), Section 10.1 (lineage privacy),
     and Section 10.2 (relative age ordering).
     """
+
+    @staticmethod
+    def _extract_city_state_country(formatted_addr: Optional[str]) -> Optional[str]:
+        """
+        Extracts strictly 'City, State, Country' from a Google formatted address string,
+        stripping street lines and postal/ZIP codes.
+        """
+        if not formatted_addr:
+            return None
+
+        parts = [p.strip() for p in formatted_addr.split(',') if p.strip()]
+        if not parts:
+            return None
+
+        cleaned_parts = []
+        for part in parts:
+            # Strip numeric postal/ZIP codes (e.g., 'NE 68102' -> 'NE', '110001' -> '')
+            token = re.sub(r'\b\d{4,6}(?:-\d{4})?\b', '', part).strip()
+            # Strip UK/Canadian alphanumeric postal codes if present
+            token = re.sub(r'\b[A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2}\b', '', token, flags=re.IGNORECASE).strip()
+            token = re.sub(r'\b[A-Z]\d[A-Z]\s*\d[A-Z]\d\b', '', token, flags=re.IGNORECASE).strip()
+            if token and not token.isdigit():
+                cleaned_parts.append(token)
+
+        if len(cleaned_parts) >= 3:
+            return ", ".join(cleaned_parts[-3:])
+        return ", ".join(cleaned_parts) if cleaned_parts else None
+
+    @classmethod
+    def _get_card_place_display(cls, location_obj, can_view: bool) -> Optional[str]:
+        """
+        Bug 3 Fix: Returns 'City, State, Country' extracted from google_formatted_address,
+        or reverse-geocoded from latitude/longitude if google_formatted_address is null.
+        """
+        if not location_obj or not can_view:
+            return None
+
+        # 1. Extract from Google Formatted Address if available
+        if location_obj.google_formatted_address:
+            return cls._extract_city_state_country(location_obj.google_formatted_address)
+
+        # 2. Reverse-geocode from Latitude / Longitude if formatted address is missing
+        if location_obj.latitude is not None and location_obj.longitude is not None:
+            api_key = getattr(settings, 'GOOGLE_MAPS_API_KEY', '')
+            if api_key:
+                try:
+                    params = urllib.parse.urlencode({
+                        'latlng': f"{location_obj.latitude},{location_obj.longitude}",
+                        'result_type': 'locality|administrative_area_level_1|country',
+                        'key': api_key,
+                    })
+                    url = f"https://maps.googleapis.com/maps/api/geocode/json?{params}"
+                    with urllib.request.urlopen(url, timeout=3) as resp:
+                        data = json.loads(resp.read().decode('utf-8'))
+                        if data.get('status') == 'OK' and data.get('results'):
+                            fmt = data['results'][0].get('formatted_address')
+                            if fmt:
+                                location_obj.google_formatted_address = fmt
+                                location_obj.save(update_fields=['google_formatted_address'])
+                                return cls._extract_city_state_country(fmt)
+                except Exception:
+                    pass
+
+        # 3. Fallback if neither Google formatted address nor coordinates are available
+        return cls._extract_city_state_country(location_obj.original_location)
 
     @staticmethod
     def _get_photo_url(individual_id: str) -> Optional[str]:
@@ -76,9 +146,9 @@ class GenealogyTreeService:
             'is_deceased': is_dec,
             'can_edit': can_view,
             'birth_date_display': cls._get_safe_date_display(person.birth_date, can_view),
-            'birth_place_display': person.birth_location.original_location if (person.birth_location and can_view) else None,
+            'birth_place_display': cls._get_card_place_display(person.birth_location, can_view),
             'death_date_display': cls._get_safe_date_display(person.death_date, can_view),
-            'death_place_display': person.death_location.original_location if (person.death_location and can_view) else None,
+            'death_place_display': cls._get_card_place_display(person.death_location, can_view),
         }
 
     @classmethod
@@ -100,7 +170,7 @@ class GenealogyTreeService:
     @classmethod
     def get_ancestor_tree(cls, individual_id: str, max_generations: Optional[int] = None, requesting_user_id: Optional[str] = None) -> Optional[dict]:
         """Recursively builds the ancestral tree (parents, grandparents) moving upward."""
-        person = IndividualDetail.objects.filter(pk=individual_id).select_related('birth_date', 'death_date').first()
+        person = IndividualDetail.objects.filter(pk=individual_id).select_related('birth_date', 'birth_location', 'death_date', 'death_location').first()
         if not person:
             return None
 
@@ -123,7 +193,7 @@ class GenealogyTreeService:
     @classmethod
     def get_descendant_tree(cls, individual_id: str, requesting_user_id: Optional[str] = None) -> Optional[dict]:
         """Recursively builds downward descendant branches with chronological sibling sorting."""
-        person = IndividualDetail.objects.filter(pk=individual_id).select_related('birth_date', 'death_date').first()
+        person = IndividualDetail.objects.filter(pk=individual_id).select_related('birth_date', 'birth_location', 'death_date', 'death_location').first()
         if not person:
             return None
 
@@ -143,7 +213,7 @@ class GenealogyTreeService:
                 spouse_card['marriage_id'] = m.marriage_id
                 node['spouses'].append(spouse_card)
 
-            children_qs = IndividualDetail.objects.filter(parent_marriage_id=m.marriage_id).select_related('birth_date', 'death_date')
+            children_qs = IndividualDetail.objects.filter(parent_marriage_id=m.marriage_id).select_related('birth_date', 'birth_location', 'death_date', 'death_location')
             sorted_children = sorted(children_qs, key=lambda ch: cls._get_date_min_bound(ch.birth_date))
 
             children_nodes = [cls.get_descendant_tree(ch.individual_id, requesting_user_id) for ch in sorted_children]
@@ -174,7 +244,7 @@ class GenealogyTreeService:
 
         uncles_qs = IndividualDetail.objects.filter(
             parent_marriage_id=parent.parent_marriage_id
-        ).exclude(pk=parent.pk).select_related('birth_date', 'death_date')
+        ).exclude(pk=parent.pk).select_related('birth_date', 'birth_location', 'death_date', 'death_location')
 
         sorted_uncles = sorted(uncles_qs, key=lambda u: cls._get_date_min_bound(u.birth_date))
 
@@ -238,7 +308,7 @@ class GenealogyTreeService:
                 # Focus Person's Siblings
                 sib_qs = IndividualDetail.objects.filter(
                     parent_marriage_id=person.parent_marriage_id
-                ).exclude(pk=person.pk).select_related('birth_date', 'death_date')
+                ).exclude(pk=person.pk).select_related('birth_date', 'birth_location', 'death_date', 'death_location')
 
                 sorted_sibs = sorted(sib_qs, key=lambda s: cls._get_date_min_bound(s.birth_date))
                 for s in sorted_sibs:
@@ -257,7 +327,7 @@ class GenealogyTreeService:
 
         siblings = IndividualDetail.objects.filter(
             parent_marriage_id=person.parent_marriage_id
-        ).select_related('birth_date')
+        ).select_related('birth_date', 'birth_location')
 
         sorted_sibs = sorted(siblings, key=lambda s: cls._get_date_min_bound(s.birth_date))
         return [cls._serialize_person(s) for s in sorted_sibs]

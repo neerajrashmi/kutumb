@@ -38,9 +38,9 @@ class IndividualCompositeForm(forms.ModelForm):
 
     # Parents Quick-Assign (inside the mini-card)
     assign_father = DescriptiveIndividualChoiceField(queryset=IndividualDetail.objects.none(), required=False, widget=forms.Select(attrs={'class': 'form-select form-select-sm', 'id': 'id_assign_father'}))
-    new_father_name = forms.CharField(max_length=100, required=False, widget=forms.TextInput(attrs={'class': 'form-control form-control-sm', 'placeholder': 'Create New Father'}))
+    new_father_name = forms.CharField(max_length=100, required=False, widget=forms.TextInput(attrs={'class': 'form-control form-control-sm', 'placeholder': 'Create New Father', 'id': 'id_new_father_name'}))
     assign_mother = DescriptiveIndividualChoiceField(queryset=IndividualDetail.objects.none(), required=False, widget=forms.Select(attrs={'class': 'form-select form-select-sm', 'id': 'id_assign_mother'}))
-    new_mother_name = forms.CharField(max_length=100, required=False, widget=forms.TextInput(attrs={'class': 'form-control form-control-sm', 'placeholder': 'Create New Mother'}))
+    new_mother_name = forms.CharField(max_length=100, required=False, widget=forms.TextInput(attrs={'class': 'form-control form-control-sm', 'placeholder': 'Create New Mother', 'id': 'id_new_mother_name'}))
 
     # Profile Photo
     profile_photo = forms.ImageField(required=False, widget=forms.FileInput(attrs={'class': 'form-control form-control-sm', 'accept': 'image/*'}))
@@ -75,20 +75,21 @@ class IndividualCompositeForm(forms.ModelForm):
     death_lat = forms.CharField(required=False, widget=forms.TextInput(attrs={'class': 'd-none', 'id': 'id_death_lat'}))
     death_lng = forms.CharField(required=False, widget=forms.TextInput(attrs={'class': 'd-none', 'id': 'id_death_lng'}))
 
-    # 4. Spouse & Marriage Block (Contextual creation or completing incomplete marriage)
+    # 4. Spouse & Marriage Block (Contextual creation, completing incomplete marriage, or editing marriage date/place)
     target_spouse_marriage_id = forms.CharField(required=False, widget=forms.HiddenInput(attrs={'id': 'id_target_spouse_marriage_id'}))
+    edit_marriage_id = forms.CharField(required=False, widget=forms.HiddenInput(attrs={'id': 'id_edit_marriage_id'}))
     add_spouse_mode = forms.ChoiceField(choices=[('NONE', 'None'), ('EXISTING', 'Existing Member'), ('NEW', 'Quick-Add New Spouse')], initial='NONE', widget=forms.Select(attrs={'class': 'form-select form-select-sm', 'id': 'id_spouse_mode'}))
     existing_spouse = DescriptiveIndividualChoiceField(queryset=IndividualDetail.objects.none(), required=False, widget=forms.Select(attrs={'class': 'form-select form-select-sm', 'id': 'id_existing_spouse'}))
     new_spouse_first_name = forms.CharField(max_length=100, required=False, widget=forms.TextInput(attrs={'class': 'form-control form-control-sm', 'placeholder': 'Spouse First Name'}))
     new_spouse_middle_name = forms.CharField(max_length=150, required=False, widget=forms.TextInput(attrs={'class': 'form-control form-control-sm', 'placeholder': 'Spouse Middle Name'}))
     new_spouse_last_name = forms.CharField(max_length=100, required=False, widget=forms.TextInput(attrs={'class': 'form-control form-control-sm', 'placeholder': 'Spouse Last Name'}))
 
-    marriage_date_precision = forms.ChoiceField(choices=DateDetail.PRECISION_CHOICES, initial='EXACT', widget=forms.Select(attrs={'class': 'form-select form-select-sm date-precision-select', 'data-prefix': 'marriage'}))
-    marriage_date_start = forms.DateField(required=False, widget=forms.DateInput(attrs={'type': 'date', 'class': 'form-control form-control-sm date-start-input'}))
-    marriage_date_end = forms.DateField(required=False, widget=forms.DateInput(attrs={'type': 'date', 'class': 'form-control form-control-sm date-end-input'}))
-    marriage_year_val = forms.IntegerField(required=False, widget=forms.NumberInput(attrs={'class': 'form-control form-control-sm date-year-input', 'placeholder': 'YYYY', 'min': 1000, 'max': 2100}))
-    marriage_year_month = forms.CharField(required=False, widget=forms.TextInput(attrs={'type': 'month', 'class': 'form-control form-control-sm date-month-input'}))
-    marriage_date_text = forms.CharField(max_length=255, required=False, widget=forms.TextInput(attrs={'class': 'form-control form-control-sm bg-light date-display-text', 'readonly': 'readonly', 'placeholder': 'Auto-generated date display'}))
+    marriage_date_precision = forms.ChoiceField(choices=DateDetail.PRECISION_CHOICES, initial='EXACT', widget=forms.Select(attrs={'class': 'form-select form-select-sm date-precision-select', 'data-prefix': 'marriage', 'id': 'id_marriage_date_precision'}))
+    marriage_date_start = forms.DateField(required=False, widget=forms.DateInput(attrs={'type': 'date', 'class': 'form-control form-control-sm date-start-input', 'id': 'id_marriage_date_start'}))
+    marriage_date_end = forms.DateField(required=False, widget=forms.DateInput(attrs={'type': 'date', 'class': 'form-control form-control-sm date-end-input', 'id': 'id_marriage_date_end'}))
+    marriage_year_val = forms.IntegerField(required=False, widget=forms.NumberInput(attrs={'class': 'form-control form-control-sm date-year-input', 'placeholder': 'YYYY', 'min': 1000, 'max': 2100, 'id': 'id_marriage_year_val'}))
+    marriage_year_month = forms.CharField(required=False, widget=forms.TextInput(attrs={'type': 'month', 'class': 'form-control form-control-sm date-month-input', 'id': 'id_marriage_year_month'}))
+    marriage_date_text = forms.CharField(max_length=255, required=False, widget=forms.TextInput(attrs={'class': 'form-control form-control-sm bg-light date-display-text', 'readonly': 'readonly', 'placeholder': 'Auto-generated date display', 'id': 'id_marriage_date_text'}))
 
     marriage_place = forms.CharField(max_length=500, required=False, widget=forms.TextInput(attrs={'class': 'form-control form-control-sm', 'placeholder': 'Search place or click map', 'id': 'id_marriage_place', 'autocomplete': 'off'}))
     marriage_place_id = forms.CharField(required=False, widget=forms.TextInput(attrs={'class': 'd-none', 'id': 'id_marriage_place_id'}))
@@ -265,13 +266,14 @@ class IndividualCompositeForm(forms.ModelForm):
             parts = new_m_name.strip().split()
             mother = IndividualDetail.objects.create(first_name=parts[0], last_name=parts[-1] if len(parts) > 1 else "", gender='F')
 
-        # Target union may come from locked_parent_marriage, the parent_marriage dropdown, or existing_pm
-        target_pm = locked_parent_marriage or self.cleaned_data.get('parent_marriage') or existing_pm
+        # Bug 2 Guard: Only allow attaching to a new parent_marriage if existing_pm is null
+        submitted_pm = None if existing_pm else self.cleaned_data.get('parent_marriage')
+        target_pm = locked_parent_marriage or existing_pm or submitted_pm
 
         if father or mother:
             pm = None
 
-            # 3a. Reuse and complete target_pm (e.g., M0000011) if it is missing one parent or already matches
+            # 3a. Reuse and complete target_pm if it is missing one parent or already matches
             if target_pm:
                 father_matches = (not target_pm.male_member_id) or (not father) or (target_pm.male_member_id == father.pk)
                 mother_matches = (not target_pm.female_member_id) or (not mother) or (target_pm.female_member_id == mother.pk)
@@ -342,7 +344,27 @@ class IndividualCompositeForm(forms.ModelForm):
                 file_size_bytes=photo_file.size
             )
 
-        # 5. Spouse & Marriage (supports completing an incomplete marriage OR creating a new one)
+        # 5. Bug 1 Fix: Edit existing marriage date and/or location in place
+        edit_m_id = (self.cleaned_data.get('edit_marriage_id') or '').strip()
+        if edit_m_id and commit:
+            m_obj = MarriageDetail.objects.filter(pk=edit_m_id).first()
+            if m_obj and (m_obj.male_member_id == individual.pk or m_obj.female_member_id == individual.pk):
+                m_obj.marriage_date = self._sync_date_entity('marriage', m_obj.marriage_date)
+                m_place = (self.cleaned_data.get('marriage_place') or '').strip()
+                if m_place:
+                    m_loc = m_obj.marriage_location or LocationDetail()
+                    m_loc.original_location = m_place
+                    m_loc.google_place_id = self.cleaned_data.get('marriage_place_id') or None
+                    m_loc.google_formatted_address = self.cleaned_data.get('marriage_formatted_address') or None
+                    m_loc.latitude = Decimal(self.cleaned_data.get('marriage_lat')) if self.cleaned_data.get('marriage_lat') else None
+                    m_loc.longitude = Decimal(self.cleaned_data.get('marriage_lng')) if self.cleaned_data.get('marriage_lng') else None
+                    m_loc.save()
+                    m_obj.marriage_location = m_loc
+                else:
+                    m_obj.marriage_location = None
+                m_obj.save()
+
+        # 6. Spouse & Marriage (supports completing an incomplete marriage OR creating a new one)
         spouse_obj = None
         spouse_mode = self.cleaned_data.get('add_spouse_mode')
         if spouse_mode == 'EXISTING':

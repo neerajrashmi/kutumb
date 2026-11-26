@@ -67,6 +67,7 @@
         {% csrf_token %}
         <input type="hidden" name="parent_marriage_id" value="{{ parent_marriage_id|default:'' }}">
         {{ form.target_spouse_marriage_id }}
+        {{ form.edit_marriage_id }}
 
         <div class="row g-2">
             <!-- ============================================================== -->
@@ -128,10 +129,13 @@
                                 <small class="text-muted d-block" style="font-size: 0.7rem;"><i class="bi bi-lock-fill text-warning"></i> Locked by union</small>
                             {% endif %}
                         </div>
-                        <div class="col-md-8">
+                        {# Bug 2 Fix: Show Attach to Lineage Union ONLY when parent_marriage is null AND neither father nor mother is already entered #}
+                        {% if not individual.parent_marriage_id and not father and not mother %}
+                        <div class="col-md-8" id="attach_lineage_union_wrapper">
                             <label class="form-label small fw-semibold mb-0">Attach to Lineage Union (M000000X)</label>
                             {{ form.parent_marriage }}
                         </div>
+                        {% endif %}
                     </div>
                 </div>
 
@@ -312,14 +316,40 @@
                             <div class="vstack gap-2">
                                 {% for m_item in marriages_data %}
                                     <div class="p-2 border rounded bg-white shadow-sm">
-                                        <div class="d-flex justify-content-between align-items-center mb-2 pb-1 border-bottom">
+                                        <div class="d-flex justify-content-between align-items-center mb-2 pb-1 border-bottom flex-wrap gap-1">
                                             <div>
                                                 <span class="badge bg-secondary">{{ m_item.marriage.marriage_id }}</span>
                                                 <span class="small fw-bold text-muted">Spouse:</span>
+                                                {% if m_item.marriage.marriage_date or m_item.marriage.marriage_location %}
+                                                    <span class="small text-muted ms-1">
+                                                        (m. {{ m_item.marriage.marriage_date.original_text|default:'Date unrecorded' }}{% if m_item.marriage.marriage_location %} @ {{ m_item.marriage.marriage_location.original_location }}{% endif %})
+                                                    </span>
+                                                {% endif %}
                                             </div>
-                                            <a href="{% url 'genealogy:individual_add' %}?parent_marriage={{ m_item.marriage.marriage_id }}" class="btn btn-success btn-xs py-0 px-2" style="font-size: 0.72rem;">
-                                                <i class="bi bi-person-plus me-1"></i>Add Child
-                                            </a>
+                                            <div class="d-flex gap-1">
+                                                {# Bug 1 Fix: Edit button to add/update marriage date and/or place #}
+                                                <button type="button"
+                                                        class="btn btn-outline-primary btn-xs py-0 px-2"
+                                                        style="font-size: 0.72rem;"
+                                                        onclick="editMarriageDetails(
+                                                            '{{ m_item.marriage.marriage_id }}',
+                                                            '{{ m_item.marriage.marriage_date.precision|default:'EXACT' }}',
+                                                            '{{ m_item.marriage.marriage_date.start_date|date:'Y-m-d'|default:'' }}',
+                                                            '{{ m_item.marriage.marriage_date.end_date|date:'Y-m-d'|default:'' }}',
+                                                            '{{ m_item.marriage.marriage_date.year_val|default:'' }}',
+                                                            '{% if m_item.marriage.marriage_date.start_date %}{{ m_item.marriage.marriage_date.start_date|date:'Y-m' }}{% endif %}',
+                                                            '{{ m_item.marriage.marriage_location.original_location|default:''|escapejs }}',
+                                                            '{{ m_item.marriage.marriage_location.google_place_id|default:''|escapejs }}',
+                                                            '{{ m_item.marriage.marriage_location.google_formatted_address|default:''|escapejs }}',
+                                                            '{{ m_item.marriage.marriage_location.latitude|default:'' }}',
+                                                            '{{ m_item.marriage.marriage_location.longitude|default:'' }}'
+                                                        )">
+                                                    <i class="bi bi-pencil-square me-1"></i>Edit Date/Place
+                                                </button>
+                                                <a href="{% url 'genealogy:individual_add' %}?parent_marriage={{ m_item.marriage.marriage_id }}" class="btn btn-success btn-xs py-0 px-2" style="font-size: 0.72rem;">
+                                                    <i class="bi bi-person-plus me-1"></i>Add Child
+                                                </a>
+                                            </div>
                                         </div>
 
                                         {% if m_item.spouse %}
@@ -397,9 +427,12 @@
                 <div class="compact-card p-2 mb-2 date-block-container" data-prefix="marriage" id="spouseMarriageBlock">
                     <div class="d-flex justify-content-between align-items-center border-bottom pb-1 mb-2">
                         <span class="section-title border-0 pb-0 mb-0" id="spouseSectionTitle">6. Record New / Additional Spouse</span>
-                        <span class="badge bg-primary d-none" id="completingMarriageBadge"></span>
+                        <div>
+                            <span class="badge bg-primary d-none" id="completingMarriageBadge"></span>
+                            <button type="button" class="btn btn-outline-secondary btn-xs py-0 px-2 d-none" id="btnCancelEditMarriage" onclick="cancelEditMarriageDetails()" style="font-size: 0.72rem;">Cancel Edit</button>
+                        </div>
                     </div>
-                    <div class="row g-1">
+                    <div class="row g-1" id="spouse_mode_row">
                         <div class="col-md-6">
                             <label class="form-label small fw-semibold mb-0">Spouse Mode</label>
                             {{ form.add_spouse_mode }}
@@ -467,12 +500,97 @@
 <script src="https://cdn.jsdelivr.net/npm/tom-select@2.3.1/dist/js/tom-select.complete.min.js"></script>
 
 <script>
-function completeMarriageSpouse(marriageId) {
-    const targetInput = document.getElementById('id_target_spouse_marriage_id');
+function editMarriageDetails(marriageId, precision, startDate, endDate, yearVal, yearMonth, place, placeId, formattedAddr, lat, lng) {
+    const editInput = document.getElementById('id_edit_marriage_id');
+    const targetSpouseInput = document.getElementById('id_target_spouse_marriage_id');
     const spouseMode = document.getElementById('id_spouse_mode');
+    const spouseModeRow = document.getElementById('spouse_mode_row');
     const titleEl = document.getElementById('spouseSectionTitle');
     const badgeEl = document.getElementById('completingMarriageBadge');
+    const cancelBtn = document.getElementById('btnCancelEditMarriage');
     const blockEl = document.getElementById('spouseMarriageBlock');
+
+    if (editInput) editInput.value = marriageId;
+    if (targetSpouseInput) targetSpouseInput.value = '';
+    if (spouseMode) spouseMode.value = 'NONE';
+    if (spouseModeRow) spouseModeRow.style.display = 'none';
+
+    document.querySelectorAll('.new_spouse_fields').forEach(el => el.style.display = 'none');
+    document.querySelectorAll('.spouse_extra').forEach(el => el.style.display = 'flex');
+
+    if (titleEl) titleEl.innerText = `6. Edit Marriage Details (${marriageId})`;
+    if (badgeEl) {
+        badgeEl.innerText = `Editing ${marriageId}`;
+        badgeEl.classList.remove('d-none');
+    }
+    if (cancelBtn) cancelBtn.classList.remove('d-none');
+
+    // Populate Date Inputs
+    const precEl = document.getElementById('id_marriage_date_precision');
+    const startEl = document.getElementById('id_marriage_date_start');
+    const endEl = document.getElementById('id_marriage_date_end');
+    const yearEl = document.getElementById('id_marriage_year_val');
+    const monthEl = document.getElementById('id_marriage_year_month');
+
+    if (startEl) startEl.value = startDate || '';
+    if (endEl) endEl.value = endDate || '';
+    if (yearEl) yearEl.value = yearVal || '';
+    if (monthEl) monthEl.value = yearMonth || '';
+    if (precEl) {
+        precEl.value = precision || 'EXACT';
+        precEl.dispatchEvent(new Event('change'));
+    }
+
+    // Populate Location Inputs
+    const placeEl = document.getElementById('id_marriage_place');
+    const placeIdEl = document.getElementById('id_marriage_place_id');
+    const fmtAddrEl = document.getElementById('id_marriage_formatted_address');
+    const latEl = document.getElementById('id_marriage_lat');
+    const lngEl = document.getElementById('id_marriage_lng');
+
+    if (placeEl) placeEl.value = place || '';
+    if (placeIdEl) placeIdEl.value = placeId || '';
+    if (fmtAddrEl) fmtAddrEl.value = formattedAddr || '';
+    if (latEl) latEl.value = lat || '';
+    if (lngEl) lngEl.value = lng || '';
+
+    if (blockEl) {
+        blockEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+}
+
+function cancelEditMarriageDetails() {
+    const editInput = document.getElementById('id_edit_marriage_id');
+    const spouseMode = document.getElementById('id_spouse_mode');
+    const spouseModeRow = document.getElementById('spouse_mode_row');
+    const titleEl = document.getElementById('spouseSectionTitle');
+    const badgeEl = document.getElementById('completingMarriageBadge');
+    const cancelBtn = document.getElementById('btnCancelEditMarriage');
+
+    if (editInput) editInput.value = '';
+    if (spouseModeRow) spouseModeRow.style.display = 'flex';
+    if (titleEl) titleEl.innerText = '6. Record New / Additional Spouse';
+    if (badgeEl) badgeEl.classList.add('d-none');
+    if (cancelBtn) cancelBtn.classList.add('d-none');
+    if (spouseMode) {
+        spouseMode.value = 'NONE';
+        spouseMode.dispatchEvent(new Event('change'));
+    }
+}
+
+function completeMarriageSpouse(marriageId) {
+    const editInput = document.getElementById('id_edit_marriage_id');
+    const targetInput = document.getElementById('id_target_spouse_marriage_id');
+    const spouseMode = document.getElementById('id_spouse_mode');
+    const spouseModeRow = document.getElementById('spouse_mode_row');
+    const titleEl = document.getElementById('spouseSectionTitle');
+    const badgeEl = document.getElementById('completingMarriageBadge');
+    const cancelBtn = document.getElementById('btnCancelEditMarriage');
+    const blockEl = document.getElementById('spouseMarriageBlock');
+
+    if (editInput) editInput.value = '';
+    if (spouseModeRow) spouseModeRow.style.display = 'flex';
+    if (cancelBtn) cancelBtn.classList.add('d-none');
 
     if (targetInput) {
         targetInput.value = marriageId;
@@ -636,9 +754,10 @@ document.addEventListener("DOMContentLoaded", function () {
     if (spouseMode) {
         function checkSpouse() {
             const val = spouseMode.value;
+            const isEditingExistingMarriage = !!(document.getElementById("id_edit_marriage_id") && document.getElementById("id_edit_marriage_id").value);
             if (existingWrapper) existingWrapper.style.display = (val === "EXISTING") ? "block" : "none";
             newFields.forEach(el => el.style.display = (val === "NEW") ? "flex" : "none");
-            extraFields.forEach(el => el.style.display = (val !== "NONE") ? "flex" : "none");
+            extraFields.forEach(el => el.style.display = (val !== "NONE" || isEditingExistingMarriage) ? "flex" : "none");
         }
         spouseMode.addEventListener("change", checkSpouse);
         checkSpouse();
@@ -675,14 +794,51 @@ document.addEventListener("DOMContentLoaded", function () {
         }
     });
 
-    // TomSelect with Opposite-Gender Filter
+    // TomSelect with Opposite-Gender Filter & Bug 2 Lineage Union visibility toggle
     const tsConfig = { create: false, maxItems: 1, allowEmptyOption: true, sortField: { field: "text", direction: "asc" } };
     const selMarriage = document.getElementById("id_parent_marriage");
-    if (selMarriage) new TomSelect(selMarriage, Object.assign({}, tsConfig, { placeholder: "Search marriage..." }));
+    let marriageTomSelect = null;
+    if (selMarriage) {
+        marriageTomSelect = new TomSelect(selMarriage, Object.assign({}, tsConfig, { placeholder: "Search marriage..." }));
+    }
     const selFather = document.getElementById("id_assign_father");
-    if (selFather) new TomSelect(selFather, Object.assign({}, tsConfig, { placeholder: "Search father..." }));
+    const newFatherInput = document.getElementById("id_new_father_name");
     const selMother = document.getElementById("id_assign_mother");
-    if (selMother) new TomSelect(selMother, Object.assign({}, tsConfig, { placeholder: "Search mother..." }));
+    const newMotherInput = document.getElementById("id_new_mother_name");
+    const lineageUnionWrapper = document.getElementById("attach_lineage_union_wrapper");
+
+    function updateLineageUnionVisibility() {
+        if (!lineageUnionWrapper) return;
+        const hasParentInput = Boolean(
+            (selFather && selFather.value) ||
+            (newFatherInput && newFatherInput.value.trim()) ||
+            (selMother && selMother.value) ||
+            (newMotherInput && newMotherInput.value.trim())
+        );
+        if (hasParentInput) {
+            lineageUnionWrapper.classList.add("d-none");
+            if (marriageTomSelect) marriageTomSelect.clear(true);
+            else if (selMarriage) selMarriage.value = "";
+        } else {
+            lineageUnionWrapper.classList.remove("d-none");
+        }
+    }
+
+    if (selFather) {
+        new TomSelect(selFather, Object.assign({}, tsConfig, {
+            placeholder: "Search father...",
+            onChange: updateLineageUnionVisibility
+        }));
+    }
+    if (selMother) {
+        new TomSelect(selMother, Object.assign({}, tsConfig, {
+            placeholder: "Search mother...",
+            onChange: updateLineageUnionVisibility
+        }));
+    }
+    if (newFatherInput) newFatherInput.addEventListener("input", updateLineageUnionVisibility);
+    if (newMotherInput) newMotherInput.addEventListener("input", updateLineageUnionVisibility);
+    updateLineageUnionVisibility();
 
     const genderSelect = document.getElementById("id_gender");
     const existingSpouseSelect = document.getElementById("id_existing_spouse");
@@ -737,8 +893,10 @@ window.initIndividualPlaces = function() {
         const map = new google.maps.Map(sec.mapEl, { center: initialCenter, zoom: hasCoords ? 14 : 2, mapTypeControl: false, streetViewControl: false });
         let marker = hasCoords ? new google.maps.Marker({ position: initialCenter, map: map }) : null;
 
-        function updateFieldsAndMarker(lat, lng, formattedAddress, placeId, originalName) {
-            if (sec.input) sec.input.value = originalName || formattedAddress || sec.input.value;
+        function updateFieldsAndMarker(lat, lng, formattedAddress, placeId, completeOriginalAddress) {
+            // Bug 4 Fix: Populate original_location with the complete supplemented address from dropdown
+            if (sec.input) sec.input.value = completeOriginalAddress || formattedAddress || sec.input.value;
+            // Keep Google Place ID, Google Formatted Address, and Lat/Lng unchanged
             if (sec.idInput) sec.idInput.value = placeId || '';
             if (sec.addrInput) sec.addrInput.value = formattedAddress || '';
             if (sec.latInput) sec.latInput.value = lat.toFixed(7);
@@ -758,7 +916,23 @@ window.initIndividualPlaces = function() {
             const place = autocomplete.getPlace();
             if (!place || !place.geometry || !place.geometry.location) return;
             sec.mapEl.classList.remove("d-none");
-            updateFieldsAndMarker(place.geometry.location.lat(), place.geometry.location.lng(), place.formatted_address, place.place_id, place.name);
+
+            const fullFormatted = place.formatted_address || '';
+            const placeName = place.name || '';
+            let completeAddress = fullFormatted;
+            if (placeName && fullFormatted && !fullFormatted.toLowerCase().startsWith(placeName.toLowerCase())) {
+                completeAddress = `${placeName}, ${fullFormatted}`;
+            } else if (!fullFormatted) {
+                completeAddress = placeName;
+            }
+
+            updateFieldsAndMarker(
+                place.geometry.location.lat(),
+                place.geometry.location.lng(),
+                fullFormatted,
+                place.place_id,
+                completeAddress
+            );
         });
 
         map.addListener('click', (e) => {
