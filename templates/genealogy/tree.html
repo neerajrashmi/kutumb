@@ -89,6 +89,9 @@
         <button id="btn-zoom-in" class="btn btn-light btn-sm" title="Zoom In"><i class="bi bi-zoom-in"></i></button>
         <button id="btn-zoom-out" class="btn btn-light btn-sm" title="Zoom Out"><i class="bi bi-zoom-out"></i></button>
         <button id="btn-reset" class="btn btn-light btn-sm" title="Fit Entire Tree to Screen"><i class="bi bi-arrows-fullscreen"></i></button>
+        <button id="btn-visible-level" class="btn btn-primary btn-sm" title="Visible Level (100% Readable Focus Card)">
+            <i class="bi bi-bullseye me-1"></i>Visible Level
+        </button>
     </div>
 
     <svg id="tree-svg" width="100%" height="100%"></svg>
@@ -144,6 +147,7 @@ document.addEventListener("DOMContentLoaded", function () {
     let currentFocusId = "{{ focus_person.individual_id }}";
     const userRootId = "{{ user.pk }}";
     let currentOrientation = "V";
+    let lastFocusCoords = { x: 0, y: 0 };
 
     const drawerEl = document.getElementById('nodeDrawer');
     let offcanvasInstance = null;
@@ -183,6 +187,10 @@ document.addEventListener("DOMContentLoaded", function () {
     function renderCard(containerGroup, person, x, y, isFocus = false) {
         const pId = person.individual_id || person.id;
         const canEdit = !!person.can_edit;
+
+        if (isFocus) {
+            lastFocusCoords = { x: x, y: y };
+        }
 
         const card = containerGroup.append("g")
             .attr("class", `node node-${person.gender === 'M' ? 'male' : (person.gender === 'F' ? 'female' : 'other')} ${isFocus ? 'node-root' : ''}`)
@@ -334,7 +342,6 @@ document.addEventListener("DOMContentLoaded", function () {
         spouses.forEach((sp, idx) => {
             let sx, sy;
             if (orientation === "H") {
-                // Horizontal orientation: line starts from left bottom line of individual and connects to top-left point of spouse
                 sx = primaryX + 18;
                 sy = primaryY + (idx + 1) * (cardHeight + 14);
 
@@ -342,8 +349,6 @@ document.addEventListener("DOMContentLoaded", function () {
                     .attr("class", "link-spouse")
                     .attr("d", `M ${primaryX} ${primaryY + cardHeight} L ${primaryX} ${sy} L ${sx} ${sy}`);
             } else {
-                // Vertical orientation: spouses sit on the EXACT same level (sy = primaryY)
-                // Line starts from top-right corner, makes horizontal elbow and connects at top-left corner of spouse
                 sx = primaryX + (idx + 1) * (cardWidth + 18);
                 sy = primaryY + 12;
 
@@ -594,9 +599,31 @@ document.addEventListener("DOMContentLoaded", function () {
         }
     }
 
+    // Zooms to 100% readable scale (1.0) keeping ONLY the Focus Card centered in the viewport
+    function zoomToVisibleLevel(duration = 400) {
+        const containerWidth = container.clientWidth;
+        const containerHeight = container.clientHeight;
+        const targetScale = 1.0;
+
+        const focusCenterX = lastFocusCoords.x + cardWidth / 2;
+        const focusCenterY = lastFocusCoords.y + cardHeight / 2;
+
+        const translateX = containerWidth / 2 - focusCenterX * targetScale;
+        const translateY = containerHeight / 2 - focusCenterY * targetScale;
+
+        const transform = d3.zoomIdentity.translate(translateX, translateY).scale(targetScale);
+
+        if (duration > 0) {
+            svg.transition().duration(duration).call(zoom.transform, transform);
+        } else {
+            svg.call(zoom.transform, transform);
+        }
+    }
+
     document.getElementById("btn-zoom-in").addEventListener("click", () => svg.transition().call(zoom.scaleBy, 1.25));
     document.getElementById("btn-zoom-out").addEventListener("click", () => svg.transition().call(zoom.scaleBy, 0.8));
     document.getElementById("btn-reset").addEventListener("click", () => fitEntireTreeToScreen(350));
+    document.getElementById("btn-visible-level").addEventListener("click", () => zoomToVisibleLevel(350));
     document.getElementById("btnCenterOnMe").addEventListener("click", () => loadTree(userRootId));
     document.getElementById("btnPrintTree").addEventListener("click", () => {
         fitEntireTreeToScreen(0);

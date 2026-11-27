@@ -122,37 +122,33 @@ def individual_search_api(request):
 
 @login_required
 def individual_create_view(request):
-    """
-    Handles contextual creation of a child linked to a specific parent marriage union.
-    Direct/isolated creation is blocked unless creating the initial root ancestor.
-    """
-    parent_marriage_id = request.POST.get('parent_marriage_id') or request.GET.get('parent_marriage')
-    pm_instance = None
-    if parent_marriage_id:
-        pm_instance = MarriageDetail.objects.filter(pk=parent_marriage_id).first()
-
-    # Integrity Guard: Block unlinked creations if the tree already has members
-    total_individuals = IndividualDetail.objects.count()
-    if total_individuals > 0 and not pm_instance and request.method == 'GET':
-        messages.warning(
-            request, 
-            "Members cannot be created without a family connection. "
-            "Please select a member from the Family Tree to add a child or spouse."
-        )
-        return redirect('genealogy:my_tree')
-
     initial_data = {}
-    if pm_instance:
-        initial_data['parent_marriage'] = pm_instance
-        if pm_instance.male_member:
-            initial_data['assign_father'] = pm_instance.male_member
-        if pm_instance.female_member:
-            initial_data['assign_mother'] = pm_instance.female_member
+    parent_marriage_id = request.GET.get('parent_marriage') or request.POST.get('parent_marriage_id')
+    parent_id = request.GET.get('parent_id') or request.POST.get('preselected_parent_id')
+    locked_pm = None
+    preselected_parent = None
+
+    if parent_marriage_id:
+        pm = MarriageDetail.objects.filter(pk=parent_marriage_id).first()
+        if pm:
+            locked_pm = pm
+            initial_data['parent_marriage'] = pm
+            if pm.male_member:
+                initial_data['assign_father'] = pm.male_member
+            if pm.female_member:
+                initial_data['assign_mother'] = pm.female_member
+    elif parent_id:
+        preselected_parent = IndividualDetail.objects.filter(pk=parent_id).first()
+        if preselected_parent:
+            if preselected_parent.gender == 'M':
+                initial_data['assign_father'] = preselected_parent
+            elif preselected_parent.gender == 'F':
+                initial_data['assign_mother'] = preselected_parent
 
     if request.method == 'POST':
-        form = IndividualCompositeForm(request.POST, request.FILES, initial=initial_data)
+        form = IndividualCompositeForm(request.POST, request.FILES)
         if form.is_valid():
-            individual = form.save(user_id=str(request.user.pk), locked_parent_marriage=pm_instance)
+            individual = form.save(user_id=str(request.user.pk), locked_parent_marriage=locked_pm)
             messages.success(request, f"Individual {individual.name} ({individual.individual_id}) created successfully.")
             return redirect('genealogy:individual_tree', individual_id=individual.individual_id)
         else:
@@ -162,82 +158,98 @@ def individual_create_view(request):
 
     return render(request, 'genealogy/individual_form.html', {
         'form': form,
-        'title': 'Add Child to Family Union' if pm_instance else 'Add Initial Family Member',
-        'locked_parent_marriage': pm_instance,
+        'title': 'Add New Family Member',
         'parent_marriage_id': parent_marriage_id or '',
+        'preselected_parent': preselected_parent,
         'GOOGLE_MAPS_API_KEY': getattr(settings, 'GOOGLE_MAPS_API_KEY', ''),
     })
 
 
 @login_required
 def individual_edit_view(request, individual_id):
-    """
-    Handles composite editing of an existing member, providing the complete
-    Direct Family Network Dashboard (Parents, all spouses, and children by marriage).
-    """
-    individual = get_object_or_404(IndividualDetail, pk=individual_id)
+    individual = get_object_or_404(
+        IndividualDetail.objects.select_related(
+            'birth_date', 'birth_location',
+            'death_date', 'death_location',
+            'parent_marriage__male_member__birth_date',
+            'parent_marriage__male_member__birth_location',
+            'parent_marriage__male_member__death_date',
+            'parent_marriage__male_member__death_location',
+            'parent_marriage__female_member__birth_date',
+            'parent_marriage__female_member__birth_location',
+            'parent_marriage__female_member__death_date',
+            'parent_marriage__female_member__death_location',
+            'parent_marriage__marriage_date',
+            'parent_marriage__marriage_location',
+        ),
+        pk=individual_id
+    )
     req_user = str(request.user.pk)
 
-    # Permission check: disallow unauthorized editing
-    can_view, can_edit = get_user_individual_permissions(req_user, individual_id)
-    if not can_edit:
-        return HttpResponseForbidden(
-            f"Access Denied: You do not possess Edit Rights on member {individual.name} ({individual.individual_id})."
-        )
-
-    # 1. Parents serialized as full tree card nodes
-    father_card = None
-    mother_card = None
-    if individual.parent_marriage:
-        pm = individual.parent_marriage
-        if pm.male_member:
-            father_card = GenealogyTreeService._serialize_person(pm.male_member, req_user)
-        if pm.female_member:
-            mother_card = GenealogyTreeService._serialize_person(pm.female_member, req_user)
-
-    # 2. All Marriages, Spouses, and Children serialized as full tree card nodes
-    marriages_data = []
-    marriages = MarriageDetail.objects.filter(
-        Q(male_member_id=individual_id) | Q(female_member_id=individual_id)
-    ).select_related('male_member', 'female_member', 'marriage_date', 'marriage_location')
-
-    for m in marriages:
-        spouse = m.female_member if m.male_member_id == individual_id else m.male_member
-        spouse_card = GenealogyTreeService._serialize_person(spouse, req_user) if spouse else None
-
-        children_qs = IndividualDetail.objects.filter(
-            parent_marriage_id=m.marriage_id
-        ).select_related('birth_date', 'birth_location', 'death_date', 'death_location')
-
-        sorted_children = sorted(children_qs, key=lambda ch: GenealogyTreeService._get_date_min_bound(ch.birth_date))
-        children_cards = [GenealogyTreeService._serialize_person(child, req_user) for child in sorted_children]
-
-        marriages_data.append({
-            'marriage': m,
-            'spouse': spouse_card,
-            'children': children_cards
-        })
-
-    # 3. Active Profile Photo
-    current_photo = None
-    photo_qs = PhotoDetail.objects.filter(individual=individual)
-    if hasattr(PhotoDetail, 'is_profile_photo'):
-        current_photo = photo_qs.filter(is_profile_photo=True, active_flag=True).order_by('-created_on').first()
-    if not current_photo:
-        current_photo = photo_qs.filter(active_flag=True).order_by('-created_on').first()
+    if not has_protected_read_access(req_user, individual.individual_id):
+        messages.error(request, "You do not have permission to edit this record.")
+        return redirect('genealogy:individual_tree', individual_id=individual.individual_id)
 
     if request.method == 'POST':
         form = IndividualCompositeForm(request.POST, request.FILES, instance=individual)
         if form.is_valid():
-            form.save(user_id=str(request.user.pk))
-            messages.success(request, f"Details for {individual.name} ({individual.individual_id}) successfully updated.")
-            return redirect('genealogy:individual_tree', individual_id=individual.individual_id)
+            form.save(user_id=req_user)
+            messages.success(request, f"Updated {individual.name} ({individual.individual_id}).")
+            return redirect('genealogy:individual_edit', individual_id=individual.individual_id)
+        else:
+            messages.error(request, "Please correct the errors below.")
     else:
         form = IndividualCompositeForm(instance=individual)
 
+    # Serialize Father & Mother using GenealogyTreeService so birth/death dates, City/State/Country places, and photos match Tree View
+    father_card = None
+    mother_card = None
+    if individual.parent_marriage:
+        if individual.parent_marriage.male_member:
+            father_card = GenealogyTreeService._serialize_person(
+                individual.parent_marriage.male_member,
+                requesting_user_id=req_user
+            )
+        if individual.parent_marriage.female_member:
+            mother_card = GenealogyTreeService._serialize_person(
+                individual.parent_marriage.female_member,
+                requesting_user_id=req_user
+            )
+
+    # Serialize Spouses & Children using GenealogyTreeService for exact parity with Tree View cards
+    marriages_qs = MarriageDetail.objects.filter(
+        Q(male_member_id=individual.pk) | Q(female_member_id=individual.pk)
+    ).select_related(
+        'male_member__birth_date', 'male_member__birth_location', 'male_member__death_date', 'male_member__death_location',
+        'female_member__birth_date', 'female_member__birth_location', 'female_member__death_date', 'female_member__death_location',
+        'marriage_date', 'marriage_location'
+    )
+
+    marriages_data = []
+    for m in marriages_qs:
+        spouse_obj = m.female_member if m.male_member_id == individual.pk else m.male_member
+        spouse_card = GenealogyTreeService._serialize_person(spouse_obj, requesting_user_id=req_user) if spouse_obj else None
+
+        children_qs = IndividualDetail.objects.filter(parent_marriage=m).select_related(
+            'birth_date', 'birth_location', 'death_date', 'death_location'
+        )
+        sorted_children = sorted(children_qs, key=lambda ch: GenealogyTreeService._get_date_min_bound(ch.birth_date))
+        children_cards = [
+            GenealogyTreeService._serialize_person(ch, requesting_user_id=req_user)
+            for ch in sorted_children
+        ]
+
+        marriages_data.append({
+            'marriage': m,
+            'spouse': spouse_card,
+            'children': children_cards,
+        })
+
+    current_photo = PhotoDetail.objects.filter(individual=individual).order_by('-created_on').first()
+
     return render(request, 'genealogy/individual_form.html', {
         'form': form,
-        'title': f'Edit Member: {individual.name} ({individual.individual_id})',
+        'title': f"Edit {individual.name}",
         'individual': individual,
         'father': father_card,
         'mother': mother_card,

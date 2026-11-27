@@ -4,11 +4,11 @@ Comprehensive Genealogy Tree Service for ancestry traversal, multi-spouse serial
 collateral paternal/maternal uncle & aunt branches, and privacy-aware graph generation.
 """
 from datetime import date
+import json
 import re
 from typing import List, Optional
 import urllib.parse
 import urllib.request
-import json
 
 from django.conf import settings
 from django.db.models import Q
@@ -55,7 +55,7 @@ class GenealogyTreeService:
     @classmethod
     def _get_card_place_display(cls, location_obj, can_view: bool) -> Optional[str]:
         """
-        Bug 3 Fix: Returns 'City, State, Country' extracted from google_formatted_address,
+        Returns 'City, State, Country' extracted from google_formatted_address,
         or reverse-geocoded from latitude/longitude if google_formatted_address is null.
         """
         if not location_obj or not can_view:
@@ -170,7 +170,9 @@ class GenealogyTreeService:
     @classmethod
     def get_ancestor_tree(cls, individual_id: str, max_generations: Optional[int] = None, requesting_user_id: Optional[str] = None) -> Optional[dict]:
         """Recursively builds the ancestral tree (parents, grandparents) moving upward."""
-        person = IndividualDetail.objects.filter(pk=individual_id).select_related('birth_date', 'birth_location', 'death_date', 'death_location').first()
+        person = IndividualDetail.objects.filter(pk=individual_id).select_related(
+            'birth_date', 'birth_location', 'death_date', 'death_location'
+        ).first()
         if not person:
             return None
 
@@ -193,7 +195,9 @@ class GenealogyTreeService:
     @classmethod
     def get_descendant_tree(cls, individual_id: str, requesting_user_id: Optional[str] = None) -> Optional[dict]:
         """Recursively builds downward descendant branches with chronological sibling sorting."""
-        person = IndividualDetail.objects.filter(pk=individual_id).select_related('birth_date', 'birth_location', 'death_date', 'death_location').first()
+        person = IndividualDetail.objects.filter(pk=individual_id).select_related(
+            'birth_date', 'birth_location', 'death_date', 'death_location'
+        ).first()
         if not person:
             return None
 
@@ -213,7 +217,9 @@ class GenealogyTreeService:
                 spouse_card['marriage_id'] = m.marriage_id
                 node['spouses'].append(spouse_card)
 
-            children_qs = IndividualDetail.objects.filter(parent_marriage_id=m.marriage_id).select_related('birth_date', 'birth_location', 'death_date', 'death_location')
+            children_qs = IndividualDetail.objects.filter(parent_marriage_id=m.marriage_id).select_related(
+                'birth_date', 'birth_location', 'death_date', 'death_location'
+            )
             sorted_children = sorted(children_qs, key=lambda ch: cls._get_date_min_bound(ch.birth_date))
 
             children_nodes = [cls.get_descendant_tree(ch.individual_id, requesting_user_id) for ch in sorted_children]
@@ -244,7 +250,9 @@ class GenealogyTreeService:
 
         uncles_qs = IndividualDetail.objects.filter(
             parent_marriage_id=parent.parent_marriage_id
-        ).exclude(pk=parent.pk).select_related('birth_date', 'birth_location', 'death_date', 'death_location')
+        ).exclude(pk=parent.pk).select_related(
+            'birth_date', 'birth_location', 'death_date', 'death_location'
+        )
 
         sorted_uncles = sorted(uncles_qs, key=lambda u: cls._get_date_min_bound(u.birth_date))
 
@@ -308,7 +316,9 @@ class GenealogyTreeService:
                 # Focus Person's Siblings
                 sib_qs = IndividualDetail.objects.filter(
                     parent_marriage_id=person.parent_marriage_id
-                ).exclude(pk=person.pk).select_related('birth_date', 'birth_location', 'death_date', 'death_location')
+                ).exclude(pk=person.pk).select_related(
+                    'birth_date', 'birth_location', 'death_date', 'death_location'
+                )
 
                 sorted_sibs = sorted(sib_qs, key=lambda s: cls._get_date_min_bound(s.birth_date))
                 for s in sorted_sibs:

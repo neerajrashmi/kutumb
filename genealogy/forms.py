@@ -12,6 +12,21 @@ from genealogy.validators import validate_individual_name
 from media_mgmt.models import PhotoDetail
 
 
+def _parse_full_name_parts(raw_name: str):
+    """
+    Splits a full name string into (first_name, middle_name, last_name)
+    preserving all middle words instead of ignoring them.
+    """
+    parts = [p for p in (raw_name or "").strip().split() if p]
+    if not parts:
+        return "", "", ""
+    if len(parts) == 1:
+        return parts[0], "", ""
+    if len(parts) == 2:
+        return parts[0], "", parts[1]
+    return parts[0], " ".join(parts[1:-1]), parts[-1]
+
+
 class DescriptiveIndividualChoiceField(forms.ModelChoiceField):
     """Renders full name, ID, and gender in dropdown options."""
     def label_from_instance(self, obj):
@@ -23,8 +38,8 @@ class DescriptiveIndividualChoiceField(forms.ModelChoiceField):
 class DescriptiveMarriageChoiceField(forms.ModelChoiceField):
     """Renders parent union names in dropdown options."""
     def label_from_instance(self, obj):
-        m_name = (" ".join(p for p in [obj.male_member.first_name, obj.male_member.last_name] if p).strip() or obj.male_member.individual_id) if obj.male_member else "Unknown"
-        f_name = (" ".join(p for p in [obj.female_member.first_name, obj.female_member.last_name] if p).strip() or obj.female_member.individual_id) if obj.female_member else "Unknown"
+        m_name = (" ".join(p for p in [obj.male_member.first_name, obj.male_member.middle_name, obj.male_member.last_name] if p).strip() or obj.male_member.individual_id) if obj.male_member else "Unknown"
+        f_name = (" ".join(p for p in [obj.female_member.first_name, obj.female_member.middle_name, obj.female_member.last_name] if p).strip() or obj.female_member.individual_id) if obj.female_member else "Unknown"
         return f"{obj.marriage_id}: {m_name} & {f_name}"
 
 
@@ -36,16 +51,16 @@ class IndividualCompositeForm(forms.ModelForm):
     gender = forms.ChoiceField(choices=IndividualDetail.GENDER_CHOICES, widget=forms.Select(attrs={'class': 'form-select form-select-sm', 'id': 'id_gender'}))
     parent_marriage = DescriptiveMarriageChoiceField(queryset=MarriageDetail.objects.all(), required=False, label="Lineage Union", widget=forms.Select(attrs={'class': 'form-select form-select-sm', 'id': 'id_parent_marriage'}))
 
-    # Parents Quick-Assign (inside the mini-card)
+    # Parents Quick-Assign / Create (supports First, Middle, Last names)
     assign_father = DescriptiveIndividualChoiceField(queryset=IndividualDetail.objects.none(), required=False, widget=forms.Select(attrs={'class': 'form-select form-select-sm', 'id': 'id_assign_father'}))
-    new_father_name = forms.CharField(max_length=100, required=False, widget=forms.TextInput(attrs={'class': 'form-control form-control-sm', 'placeholder': 'Create New Father', 'id': 'id_new_father_name'}))
+    new_father_name = forms.CharField(max_length=255, required=False, widget=forms.TextInput(attrs={'class': 'form-control form-control-sm', 'placeholder': 'New Father (First Middle Last)', 'id': 'id_new_father_name'}))
     assign_mother = DescriptiveIndividualChoiceField(queryset=IndividualDetail.objects.none(), required=False, widget=forms.Select(attrs={'class': 'form-select form-select-sm', 'id': 'id_assign_mother'}))
-    new_mother_name = forms.CharField(max_length=100, required=False, widget=forms.TextInput(attrs={'class': 'form-control form-control-sm', 'placeholder': 'Create New Mother', 'id': 'id_new_mother_name'}))
+    new_mother_name = forms.CharField(max_length=255, required=False, widget=forms.TextInput(attrs={'class': 'form-control form-control-sm', 'placeholder': 'New Mother (First Middle Last)', 'id': 'id_new_mother_name'}))
 
     # Profile Photo
     profile_photo = forms.ImageField(required=False, widget=forms.FileInput(attrs={'class': 'form-control form-control-sm', 'accept': 'image/*'}))
 
-    # 2. Birth Date Block (Precision First, Auto-generated Read-Only text)
+    # 2. Birth Date Block
     birth_date_precision = forms.ChoiceField(choices=DateDetail.PRECISION_CHOICES, initial='EXACT', widget=forms.Select(attrs={'class': 'form-select form-select-sm date-precision-select', 'data-prefix': 'birth'}))
     birth_date_start = forms.DateField(required=False, widget=forms.DateInput(attrs={'type': 'date', 'class': 'form-control form-control-sm date-start-input'}))
     birth_date_end = forms.DateField(required=False, widget=forms.DateInput(attrs={'type': 'date', 'class': 'form-control form-control-sm date-end-input'}))
@@ -60,7 +75,7 @@ class IndividualCompositeForm(forms.ModelForm):
     birth_lat = forms.CharField(required=False, widget=forms.TextInput(attrs={'class': 'd-none', 'id': 'id_birth_lat'}))
     birth_lng = forms.CharField(required=False, widget=forms.TextInput(attrs={'class': 'd-none', 'id': 'id_birth_lng'}))
 
-    # 3. Death Date Block (Precision First, Auto-generated Read-Only text)
+    # 3. Death Date Block
     death_date_precision = forms.ChoiceField(choices=DateDetail.PRECISION_CHOICES, initial='EXACT', widget=forms.Select(attrs={'class': 'form-select form-select-sm date-precision-select', 'data-prefix': 'death'}))
     death_date_start = forms.DateField(required=False, widget=forms.DateInput(attrs={'type': 'date', 'class': 'form-control form-control-sm date-start-input'}))
     death_date_end = forms.DateField(required=False, widget=forms.DateInput(attrs={'type': 'date', 'class': 'form-control form-control-sm date-end-input'}))
@@ -75,7 +90,7 @@ class IndividualCompositeForm(forms.ModelForm):
     death_lat = forms.CharField(required=False, widget=forms.TextInput(attrs={'class': 'd-none', 'id': 'id_death_lat'}))
     death_lng = forms.CharField(required=False, widget=forms.TextInput(attrs={'class': 'd-none', 'id': 'id_death_lng'}))
 
-    # 4. Spouse & Marriage Block (Contextual creation, completing incomplete marriage, or editing marriage date/place)
+    # 4. Spouse & Marriage Block
     target_spouse_marriage_id = forms.CharField(required=False, widget=forms.HiddenInput(attrs={'id': 'id_target_spouse_marriage_id'}))
     edit_marriage_id = forms.CharField(required=False, widget=forms.HiddenInput(attrs={'id': 'id_edit_marriage_id'}))
     add_spouse_mode = forms.ChoiceField(choices=[('NONE', 'None'), ('EXISTING', 'Existing Member'), ('NEW', 'Quick-Add New Spouse')], initial='NONE', widget=forms.Select(attrs={'class': 'form-select form-select-sm', 'id': 'id_spouse_mode'}))
@@ -106,10 +121,12 @@ class IndividualCompositeForm(forms.ModelForm):
         all_inds = IndividualDetail.objects.all().order_by('first_name', 'last_name')
         self.is_gender_locked = False
         self._original_parent_marriage_id = None
+        self.has_existing_father = False
+        self.has_existing_mother = False
         current_gender = None
 
         if self.instance and self.instance.pk:
-            # Capture original parent_marriage_id BEFORE form.is_valid() / _post_clean() can overwrite self.instance.parent_marriage
+																																												
             self._original_parent_marriage_id = self.instance.parent_marriage_id
             all_inds = all_inds.exclude(pk=self.instance.pk)
             current_gender = self.instance.gender
@@ -120,17 +137,23 @@ class IndividualCompositeForm(forms.ModelForm):
                 self.is_gender_locked = True
                 self.fields['gender'].disabled = True
 
-            # Pre-fill assign_father / assign_mother from existing parent_marriage if present
+																							 
             if self.instance.parent_marriage:
                 if self.instance.parent_marriage.male_member:
+                    self.has_existing_father = True
                     self.fields['assign_father'].initial = self.instance.parent_marriage.male_member
+                    self.fields['assign_father'].disabled = True
+                    self.fields['new_father_name'].disabled = True
                 if self.instance.parent_marriage.female_member:
+                    self.has_existing_mother = True
                     self.fields['assign_mother'].initial = self.instance.parent_marriage.female_member
+                    self.fields['assign_mother'].disabled = True
+                    self.fields['new_mother_name'].disabled = True
 
         self.fields['assign_father'].queryset = all_inds.filter(gender='M')
         self.fields['assign_mother'].queryset = all_inds.filter(gender='F')
 
-        # Gender-strict spouse filtering (SRS Section 6 & 34)
+															 
         if current_gender == 'M':
             self.fields['existing_spouse'].queryset = all_inds.filter(gender='F')
         elif current_gender == 'F':
@@ -138,7 +161,7 @@ class IndividualCompositeForm(forms.ModelForm):
         else:
             self.fields['existing_spouse'].queryset = all_inds
 
-        # Pre-populate date states
+								  
         if self.instance and self.instance.pk:
             self._prefill_date('birth', self.instance.birth_date, self.instance.birth_location)
             self._prefill_date('death', self.instance.death_date, self.instance.death_location)
@@ -166,6 +189,23 @@ class IndividualCompositeForm(forms.ModelForm):
             cleaned_data.get('middle_name', ''),
             cleaned_data.get('last_name', '')
         )
+
+        # Requirement 1: An individual cannot have more than one Father or more than one Mother
+        if self.has_existing_father and (cleaned_data.get('new_father_name') or '').strip():
+            raise ValidationError("This individual already has a Father recorded and cannot have more than one Father.")
+        if self.has_existing_mother and (cleaned_data.get('new_mother_name') or '').strip():
+            raise ValidationError("This individual already has a Mother recorded and cannot have more than one Mother.")
+
+        # Requirement 2: Validate new Father/Mother names (including middle name) before creating records
+        new_f = (cleaned_data.get('new_father_name') or '').strip()
+        if new_f and not cleaned_data.get('assign_father'):
+            f_fn, f_mn, f_ln = _parse_full_name_parts(new_f)
+            validate_individual_name(f_fn, f_mn, f_ln)
+
+        new_m = (cleaned_data.get('new_mother_name') or '').strip()
+        if new_m and not cleaned_data.get('assign_mother'):
+            m_fn, m_mn, m_ln = _parse_full_name_parts(new_m)
+            validate_individual_name(m_fn, m_mn, m_ln)
 
         ind_gender = self.instance.gender if (self.instance and self.instance.pk and self.is_gender_locked) else cleaned_data.get('gender')
         ex_spouse = cleaned_data.get('existing_spouse')
@@ -196,8 +236,8 @@ class IndividualCompositeForm(forms.ModelForm):
                 return cleaned_data
 
         p_marriage = cleaned_data.get('parent_marriage')
-        father = cleaned_data.get('assign_father') or cleaned_data.get('new_father_name')
-        mother = cleaned_data.get('assign_mother') or cleaned_data.get('new_mother_name')
+        father = cleaned_data.get('assign_father') or new_f
+        mother = cleaned_data.get('assign_mother') or new_m
         spouse = (cleaned_data.get('add_spouse_mode') != 'NONE')
 
         if not (p_marriage or father or mother or spouse):
@@ -210,7 +250,7 @@ class IndividualCompositeForm(forms.ModelForm):
 
     @transaction.atomic
     def save(self, commit=True, user_id=None, locked_parent_marriage=None):
-        # Retrieve original parent_marriage captured in __init__ BEFORE ModelForm._post_clean() cleared it
+																										  
         existing_pm = None
         if self._original_parent_marriage_id:
             existing_pm = MarriageDetail.objects.filter(pk=self._original_parent_marriage_id).first()
@@ -219,7 +259,7 @@ class IndividualCompositeForm(forms.ModelForm):
         if self.instance and self.instance.pk and self.is_gender_locked:
             individual.gender = self.instance.gender
 
-        # 1. Sync Birth Date
+        # 1. Sync Birth Date & Location
         individual.birth_date = self._sync_date_entity('birth', individual.birth_date)
         b_place = self.cleaned_data.get('birth_place')
         if b_place:
@@ -236,7 +276,7 @@ class IndividualCompositeForm(forms.ModelForm):
         elif individual.birth_location and not b_place:
             individual.birth_location = None
 
-        # 2. Sync Death Date
+        # 2. Sync Death Date & Location
         individual.death_date = self._sync_date_entity('death', individual.death_date)
         d_place = self.cleaned_data.get('death_place')
         if d_place:
@@ -253,27 +293,43 @@ class IndividualCompositeForm(forms.ModelForm):
         elif individual.death_location and not d_place:
             individual.death_location = None
 
-        # 3. Direct Father / Mother Assignment (reuses & completes existing single-parent union)
-        father = self.cleaned_data.get('assign_father')
-        new_f_name = self.cleaned_data.get('new_father_name')
-        if not father and new_f_name:
-            parts = new_f_name.strip().split()
-            father = IndividualDetail.objects.create(first_name=parts[0], last_name=parts[-1] if len(parts) > 1 else "", gender='M')
+        # 3. Direct Father / Mother Assignment (Requirement 1 & Requirement 2)
+        if existing_pm and existing_pm.male_member:
+            father = existing_pm.male_member
+        else:
+            father = self.cleaned_data.get('assign_father')
+            new_f_name = (self.cleaned_data.get('new_father_name') or '').strip()
+            if not father and new_f_name:
+                f_fn, f_mn, f_ln = _parse_full_name_parts(new_f_name)
+                father = IndividualDetail.objects.create(
+                    first_name=f_fn,
+                    middle_name=f_mn,
+                    last_name=f_ln,
+                    gender='M'
+                )
 
-        mother = self.cleaned_data.get('assign_mother')
-        new_m_name = self.cleaned_data.get('new_mother_name')
-        if not mother and new_m_name:
-            parts = new_m_name.strip().split()
-            mother = IndividualDetail.objects.create(first_name=parts[0], last_name=parts[-1] if len(parts) > 1 else "", gender='F')
+        if existing_pm and existing_pm.female_member:
+            mother = existing_pm.female_member
+        else:
+            mother = self.cleaned_data.get('assign_mother')
+            new_m_name = (self.cleaned_data.get('new_mother_name') or '').strip()
+            if not mother and new_m_name:
+                m_fn, m_mn, m_ln = _parse_full_name_parts(new_m_name)
+                mother = IndividualDetail.objects.create(
+                    first_name=m_fn,
+                    middle_name=m_mn,
+                    last_name=m_ln,
+                    gender='F'
+                )
 
-        # Bug 2 Guard: Only allow attaching to a new parent_marriage if existing_pm is null
+																						   
         submitted_pm = None if existing_pm else self.cleaned_data.get('parent_marriage')
         target_pm = locked_parent_marriage or existing_pm or submitted_pm
 
         if father or mother:
             pm = None
 
-            # 3a. Reuse and complete target_pm if it is missing one parent or already matches
+																							 
             if target_pm:
                 father_matches = (not target_pm.male_member_id) or (not father) or (target_pm.male_member_id == father.pk)
                 mother_matches = (not target_pm.female_member_id) or (not mother) or (target_pm.female_member_id == mother.pk)
@@ -305,7 +361,7 @@ class IndividualCompositeForm(forms.ModelForm):
                             target_pm.save()
                         pm = target_pm
 
-            # 3b. Otherwise look up an existing union for these parents or create a new one
+            # Requirement 3: Creates or reuses single-parent MarriageDetail (e.g., Mar1 with Ind1 + null second parent)
             if not pm:
                 if father and mother:
                     pm = MarriageDetail.objects.filter(male_member=father, female_member=mother).first()
@@ -344,7 +400,7 @@ class IndividualCompositeForm(forms.ModelForm):
                 file_size_bytes=photo_file.size
             )
 
-        # 5. Bug 1 Fix: Edit existing marriage date and/or location in place
+        # 5. Edit existing marriage date and/or location in place
         edit_m_id = (self.cleaned_data.get('edit_marriage_id') or '').strip()
         if edit_m_id and commit:
             m_obj = MarriageDetail.objects.filter(pk=edit_m_id).first()
@@ -364,7 +420,7 @@ class IndividualCompositeForm(forms.ModelForm):
                     m_obj.marriage_location = None
                 m_obj.save()
 
-        # 6. Spouse & Marriage (supports completing an incomplete marriage OR creating a new one)
+        # 6. Spouse & Marriage
         spouse_obj = None
         spouse_mode = self.cleaned_data.get('add_spouse_mode')
         if spouse_mode == 'EXISTING':
@@ -402,7 +458,7 @@ class IndividualCompositeForm(forms.ModelForm):
                 (target_marriage.male_member_id == individual.pk and not target_marriage.female_member_id) or
                 (target_marriage.female_member_id == individual.pk and not target_marriage.male_member_id)
             ):
-                # Complete the existing incomplete marriage (e.g., M0000007)
+																			
                 existing_pair = MarriageDetail.objects.filter(
                     male_member=male, female_member=female
                 ).exclude(pk=target_marriage.pk).first()

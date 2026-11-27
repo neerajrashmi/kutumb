@@ -43,9 +43,15 @@
             {% if individual and individual.pk %}
                 <span class="badge bg-secondary ms-2">{{ individual.individual_id }}</span>
             {% endif %}
+            {% if preselected_parent %}
+                <span class="badge bg-success ms-2">Adding Child of {{ preselected_parent.name }} ({{ preselected_parent.individual_id }})</span>
+            {% endif %}
         </div>
         <div class="d-flex gap-1">
             {% if individual and individual.pk %}
+                <a href="{% url 'genealogy:individual_add' %}?parent_id={{ individual.individual_id }}" class="btn btn-success btn-sm py-0 px-2">
+                    <i class="bi bi-person-plus me-1"></i>Add Child
+                </a>
                 <a href="{% url 'contacts:manage_contacts' individual.individual_id %}" class="btn btn-outline-primary btn-sm py-0 px-2">
                     <i class="bi bi-telephone me-1"></i>Contacts
                 </a>
@@ -66,6 +72,7 @@
     <form method="post" enctype="multipart/form-data" novalidate id="individualForm">
         {% csrf_token %}
         <input type="hidden" name="parent_marriage_id" value="{{ parent_marriage_id|default:'' }}">
+        <input type="hidden" name="preselected_parent_id" value="{{ preselected_parent.individual_id|default:'' }}">
         {{ form.target_spouse_marriage_id }}
         {{ form.edit_marriage_id }}
 
@@ -129,8 +136,8 @@
                                 <small class="text-muted d-block" style="font-size: 0.7rem;"><i class="bi bi-lock-fill text-warning"></i> Locked by union</small>
                             {% endif %}
                         </div>
-                        {# Bug 2 Fix: Show Attach to Lineage Union ONLY when parent_marriage is null AND neither father nor mother is already entered #}
-                        {% if not individual.parent_marriage_id and not father and not mother %}
+                        {# Show Attach to Lineage Union ONLY when parent_marriage is null AND no father/mother/preselected_parent is entered #}
+                        {% if not individual.parent_marriage_id and not father and not mother and not preselected_parent %}
                         <div class="col-md-8" id="attach_lineage_union_wrapper">
                             <label class="form-label small fw-semibold mb-0">Attach to Lineage Union (M000000X)</label>
                             {{ form.parent_marriage }}
@@ -232,15 +239,22 @@
             <div class="col-lg-7">
                 <!-- 4. Parents Block -->
                 <div class="compact-card p-2 mb-2">
-                    <div class="d-flex justify-content-between align-items-center border-bottom pb-1 mb-2">
-                        <span class="section-title border-0 pb-0 mb-0">4. Parents</span>
-                        {% if individual.parent_marriage %}
-                            <span class="badge bg-light text-dark border">Union: {{ individual.parent_marriage.marriage_id }}</span>
-                        {% endif %}
+                    <div class="d-flex justify-content-between align-items-center border-bottom pb-1 mb-2 flex-wrap gap-1">
+                        <div>
+                            <span class="section-title border-0 pb-0 mb-0">4. Parents</span>
+                            {% if individual.parent_marriage %}
+                                <span class="badge bg-secondary ms-1">{{ individual.parent_marriage.marriage_id }}</span>
+                                {% if individual.parent_marriage.marriage_date or individual.parent_marriage.marriage_location %}
+                                    <span class="small text-muted ms-1">
+                                        (m. {{ individual.parent_marriage.marriage_date.original_text|default:'Date unrecorded' }}{% if individual.parent_marriage.marriage_location %} @ {{ individual.parent_marriage.marriage_location.original_location }}{% endif %})
+                                    </span>
+                                {% endif %}
+                            {% endif %}
+                        </div>
                     </div>
 
                     <div class="d-flex flex-wrap gap-2">
-                        <!-- Father Tree Card -->
+                        <!-- Father Slot -->
                         {% if father %}
                             <div class="tree-card-node tree-card-male shadow-sm">
                                 <div class="d-flex align-items-center gap-2">
@@ -250,15 +264,25 @@
                                         <div class="tree-card-avatar-placeholder">♂</div>
                                     {% endif %}
                                     <div class="overflow-hidden">
-                                        <div class="tree-card-title">{{ father.name }}</div>
+                                        <div class="tree-card-title" title="{{ father.name }}">{{ father.name }}</div>
                                         <div class="tree-card-sub">{{ father.individual_id }} (M) {% if father.can_edit %}✎{% else %}🔒{% endif %}</div>
                                     </div>
                                 </div>
-                                <div class="tree-card-event text-muted">
-                                    b. {{ father.birth_date_display|default:'Unrecorded' }}{% if father.birth_place_display %} in {{ father.birth_place_display }}{% endif %}
+                                <div class="tree-card-event text-muted" title="{% if father.birth_date_display or father.birth_place_display %}b. {{ father.birth_date_display|default:'Unrecorded' }}{% if father.birth_place_display %} in {{ father.birth_place_display }}{% endif %}{% endif %}">
+                                    {% if father.birth_date_display or father.birth_place_display %}
+                                        b. {{ father.birth_date_display|default:'Unrecorded' }}{% if father.birth_place_display %} in {{ father.birth_place_display }}{% endif %}
+                                    {% else %}
+                                        🔒 Dates Restricted
+                                    {% endif %}
                                 </div>
-                                <div class="tree-card-event {% if father.is_deceased %}text-danger{% else %}text-success{% endif %}">
-                                    {% if father.death_date_display or father.death_place_display %}d. {{ father.death_date_display|default:'Unrecorded' }}{% else %}Living{% endif %}
+                                <div class="tree-card-event {% if father.is_deceased %}text-danger{% else %}text-success{% endif %}" title="{% if father.death_date_display or father.death_place_display %}d. {{ father.death_date_display|default:'Unrecorded' }}{% if father.death_place_display %} in {{ father.death_place_display }}{% endif %}{% endif %}">
+                                    {% if father.death_date_display or father.death_place_display %}
+                                        d. {{ father.death_date_display|default:'Unrecorded' }}{% if father.death_place_display %} in {{ father.death_place_display }}{% endif %}
+                                    {% elif father.is_deceased %}
+                                        🔒 Deceased
+                                    {% else %}
+                                        Living
+                                    {% endif %}
                                 </div>
                                 <div class="tree-card-actions">
                                     {% if father.can_edit %}<a href="{% url 'genealogy:individual_edit' father.individual_id %}" class="bg-primary text-white">Edit</a>{% endif %}
@@ -266,14 +290,16 @@
                                 </div>
                             </div>
                         {% else %}
-                            <div class="p-2 border rounded bg-light" style="width: 210px; min-height: 95px;">
+                            <div class="p-2 border rounded bg-light" style="width: 225px; min-height: 95px;">
                                 <span class="badge bg-secondary mb-1">Father: Unrecorded</span>
                                 {{ form.assign_father }}
-                                <div class="mt-1">{{ form.new_father_name }}</div>
+                                {% if not preselected_parent or preselected_parent.gender != 'M' %}
+                                    <div class="mt-1" id="new_father_wrapper">{{ form.new_father_name }}</div>
+                                {% endif %}
                             </div>
                         {% endif %}
 
-                        <!-- Mother Tree Card -->
+                        <!-- Mother Slot -->
                         {% if mother %}
                             <div class="tree-card-node tree-card-female shadow-sm">
                                 <div class="d-flex align-items-center gap-2">
@@ -283,15 +309,25 @@
                                         <div class="tree-card-avatar-placeholder">♀</div>
                                     {% endif %}
                                     <div class="overflow-hidden">
-                                        <div class="tree-card-title">{{ mother.name }}</div>
+                                        <div class="tree-card-title" title="{{ mother.name }}">{{ mother.name }}</div>
                                         <div class="tree-card-sub">{{ mother.individual_id }} (F) {% if mother.can_edit %}✎{% else %}🔒{% endif %}</div>
                                     </div>
                                 </div>
-                                <div class="tree-card-event text-muted">
-                                    b. {{ mother.birth_date_display|default:'Unrecorded' }}{% if mother.birth_place_display %} in {{ mother.birth_place_display }}{% endif %}
+                                <div class="tree-card-event text-muted" title="{% if mother.birth_date_display or mother.birth_place_display %}b. {{ mother.birth_date_display|default:'Unrecorded' }}{% if mother.birth_place_display %} in {{ mother.birth_place_display }}{% endif %}{% endif %}">
+                                    {% if mother.birth_date_display or mother.birth_place_display %}
+                                        b. {{ mother.birth_date_display|default:'Unrecorded' }}{% if mother.birth_place_display %} in {{ mother.birth_place_display }}{% endif %}
+                                    {% else %}
+                                        🔒 Dates Restricted
+                                    {% endif %}
                                 </div>
-                                <div class="tree-card-event {% if mother.is_deceased %}text-danger{% else %}text-success{% endif %}">
-                                    {% if mother.death_date_display or mother.death_place_display %}d. {{ mother.death_date_display|default:'Unrecorded' }}{% else %}Living{% endif %}
+                                <div class="tree-card-event {% if mother.is_deceased %}text-danger{% else %}text-success{% endif %}" title="{% if mother.death_date_display or mother.death_place_display %}d. {{ mother.death_date_display|default:'Unrecorded' }}{% if mother.death_place_display %} in {{ mother.death_place_display }}{% endif %}{% endif %}">
+                                    {% if mother.death_date_display or mother.death_place_display %}
+                                        d. {{ mother.death_date_display|default:'Unrecorded' }}{% if mother.death_place_display %} in {{ mother.death_place_display }}{% endif %}
+                                    {% elif mother.is_deceased %}
+                                        🔒 Deceased
+                                    {% else %}
+                                        Living
+                                    {% endif %}
                                 </div>
                                 <div class="tree-card-actions">
                                     {% if mother.can_edit %}<a href="{% url 'genealogy:individual_edit' mother.individual_id %}" class="bg-primary text-white">Edit</a>{% endif %}
@@ -299,19 +335,25 @@
                                 </div>
                             </div>
                         {% else %}
-                            <div class="p-2 border rounded bg-light" style="width: 210px; min-height: 95px;">
+                            <div class="p-2 border rounded bg-light" style="width: 225px; min-height: 95px;">
                                 <span class="badge bg-secondary mb-1">Mother: Unrecorded</span>
                                 {{ form.assign_mother }}
-                                <div class="mt-1">{{ form.new_mother_name }}</div>
+                                {% if not preselected_parent or preselected_parent.gender != 'F' %}
+                                    <div class="mt-1" id="new_mother_wrapper">{{ form.new_mother_name }}</div>
+                                {% endif %}
                             </div>
                         {% endif %}
                     </div>
                 </div>
-
                 <!-- 5. Spouses & Children with Visual Tree Cards -->
                 {% if individual and individual.pk %}
                     <div class="compact-card p-2 mb-2">
-                        <div class="section-title mb-2">5. Spouse(s) & Children</div>
+                        <div class="d-flex justify-content-between align-items-center border-bottom pb-1 mb-2">
+                            <span class="section-title border-0 pb-0 mb-0">5. Spouse(s) & Children</span>
+                            <a href="{% url 'genealogy:individual_add' %}?parent_id={{ individual.individual_id }}" class="btn btn-outline-success btn-xs py-0 px-2" style="font-size: 0.72rem;">
+                                <i class="bi bi-person-plus me-1"></i>Add Child (Without Spouse)
+                            </a>
+                        </div>
                         {% if marriages_data %}
                             <div class="vstack gap-2">
                                 {% for m_item in marriages_data %}
@@ -327,7 +369,6 @@
                                                 {% endif %}
                                             </div>
                                             <div class="d-flex gap-1">
-                                                {# Bug 1 Fix: Edit button to add/update marriage date and/or place #}
                                                 <button type="button"
                                                         class="btn btn-outline-primary btn-xs py-0 px-2"
                                                         style="font-size: 0.72rem;"
@@ -361,13 +402,25 @@
                                                         <div class="tree-card-avatar-placeholder">{% if m_item.spouse.gender == 'M' %}♂{% else %}♀{% endif %}</div>
                                                     {% endif %}
                                                     <div class="overflow-hidden">
-                                                        <div class="tree-card-title">{{ m_item.spouse.name }}</div>
-                                                        <div class="tree-card-sub">{{ m_item.spouse.individual_id }} ({{ m_item.spouse.gender }})</div>
+                                                        <div class="tree-card-title" title="{{ m_item.spouse.name }}">{{ m_item.spouse.name }}</div>
+                                                        <div class="tree-card-sub">{{ m_item.spouse.individual_id }} ({{ m_item.spouse.gender }}) {% if m_item.spouse.can_edit %}✎{% else %}🔒{% endif %}</div>
                                                     </div>
                                                 </div>
-                                                <div class="tree-card-event text-muted">b. {{ m_item.spouse.birth_date_display|default:'Unrecorded' }}</div>
-                                                <div class="tree-card-event {% if m_item.spouse.is_deceased %}text-danger{% else %}text-success{% endif %}">
-                                                    {% if m_item.spouse.death_date_display %}d. {{ m_item.spouse.death_date_display }}{% else %}Living{% endif %}
+                                                <div class="tree-card-event text-muted" title="{% if m_item.spouse.birth_date_display or m_item.spouse.birth_place_display %}b. {{ m_item.spouse.birth_date_display|default:'Unrecorded' }}{% if m_item.spouse.birth_place_display %} in {{ m_item.spouse.birth_place_display }}{% endif %}{% endif %}">
+                                                    {% if m_item.spouse.birth_date_display or m_item.spouse.birth_place_display %}
+                                                        b. {{ m_item.spouse.birth_date_display|default:'Unrecorded' }}{% if m_item.spouse.birth_place_display %} in {{ m_item.spouse.birth_place_display }}{% endif %}
+                                                    {% else %}
+                                                        🔒 Dates Restricted
+                                                    {% endif %}
+                                                </div>
+                                                <div class="tree-card-event {% if m_item.spouse.is_deceased %}text-danger{% else %}text-success{% endif %}" title="{% if m_item.spouse.death_date_display or m_item.spouse.death_place_display %}d. {{ m_item.spouse.death_date_display|default:'Unrecorded' }}{% if m_item.spouse.death_place_display %} in {{ m_item.spouse.death_place_display }}{% endif %}{% endif %}">
+                                                    {% if m_item.spouse.death_date_display or m_item.spouse.death_place_display %}
+                                                        d. {{ m_item.spouse.death_date_display|default:'Unrecorded' }}{% if m_item.spouse.death_place_display %} in {{ m_item.spouse.death_place_display }}{% endif %}
+                                                    {% elif m_item.spouse.is_deceased %}
+                                                        🔒 Deceased
+                                                    {% else %}
+                                                        Living
+                                                    {% endif %}
                                                 </div>
                                                 <div class="tree-card-actions">
                                                     {% if m_item.spouse.can_edit %}<a href="{% url 'genealogy:individual_edit' m_item.spouse.individual_id %}" class="bg-primary text-white">Edit</a>{% endif %}
@@ -399,13 +452,25 @@
                                                             <div class="tree-card-avatar-placeholder">{% if child.gender == 'M' %}♂{% else %}♀{% endif %}</div>
                                                         {% endif %}
                                                         <div class="overflow-hidden">
-                                                            <div class="tree-card-title">{{ child.name }}</div>
-                                                            <div class="tree-card-sub">{{ child.individual_id }} ({{ child.gender }})</div>
+                                                            <div class="tree-card-title" title="{{ child.name }}">{{ child.name }}</div>
+                                                            <div class="tree-card-sub">{{ child.individual_id }} ({{ child.gender }}) {% if child.can_edit %}✎{% else %}🔒{% endif %}</div>
                                                         </div>
                                                     </div>
-                                                    <div class="tree-card-event text-muted">b. {{ child.birth_date_display|default:'Unrecorded' }}</div>
-                                                    <div class="tree-card-event {% if child.is_deceased %}text-danger{% else %}text-success{% endif %}">
-                                                        {% if child.death_date_display %}d. {{ child.death_date_display }}{% else %}Living{% endif %}
+                                                    <div class="tree-card-event text-muted" title="{% if child.birth_date_display or child.birth_place_display %}b. {{ child.birth_date_display|default:'Unrecorded' }}{% if child.birth_place_display %} in {{ child.birth_place_display }}{% endif %}{% endif %}">
+                                                        {% if child.birth_date_display or child.birth_place_display %}
+                                                            b. {{ child.birth_date_display|default:'Unrecorded' }}{% if child.birth_place_display %} in {{ child.birth_place_display }}{% endif %}
+                                                        {% else %}
+                                                            🔒 Dates Restricted
+                                                        {% endif %}
+                                                    </div>
+                                                    <div class="tree-card-event {% if child.is_deceased %}text-danger{% else %}text-success{% endif %}" title="{% if child.death_date_display or child.death_place_display %}d. {{ child.death_date_display|default:'Unrecorded' }}{% if child.death_place_display %} in {{ child.death_place_display }}{% endif %}{% endif %}">
+                                                        {% if child.death_date_display or child.death_place_display %}
+                                                            d. {{ child.death_date_display|default:'Unrecorded' }}{% if child.death_place_display %} in {{ child.death_place_display }}{% endif %}
+                                                        {% elif child.is_deceased %}
+                                                            🔒 Deceased
+                                                        {% else %}
+                                                            Living
+                                                        {% endif %}
                                                     </div>
                                                     <div class="tree-card-actions">
                                                         {% if child.can_edit %}<a href="{% url 'genealogy:individual_edit' child.individual_id %}" class="bg-primary text-white">Edit</a>{% endif %}
@@ -418,6 +483,10 @@
                                         </div>
                                     </div>
                                 {% endfor %}
+                            </div>
+                        {% else %}
+                            <div class="small text-muted fst-italic">
+                                No spouse recorded yet. Click <strong>Add Child (Without Spouse)</strong> above to record a child directly under {{ individual.name }}.
                             </div>
                         {% endif %}
                     </div>
@@ -525,7 +594,6 @@ function editMarriageDetails(marriageId, precision, startDate, endDate, yearVal,
     }
     if (cancelBtn) cancelBtn.classList.remove('d-none');
 
-    // Populate Date Inputs
     const precEl = document.getElementById('id_marriage_date_precision');
     const startEl = document.getElementById('id_marriage_date_start');
     const endEl = document.getElementById('id_marriage_date_end');
@@ -541,7 +609,6 @@ function editMarriageDetails(marriageId, precision, startDate, endDate, yearVal,
         precEl.dispatchEvent(new Event('change'));
     }
 
-    // Populate Location Inputs
     const placeEl = document.getElementById('id_marriage_place');
     const placeIdEl = document.getElementById('id_marriage_place_id');
     const fmtAddrEl = document.getElementById('id_marriage_formatted_address');
@@ -794,7 +861,7 @@ document.addEventListener("DOMContentLoaded", function () {
         }
     });
 
-    // TomSelect with Opposite-Gender Filter & Bug 2 Lineage Union visibility toggle
+    // TomSelect & Parent Mutual Exclusivity (Requirement 1)
     const tsConfig = { create: false, maxItems: 1, allowEmptyOption: true, sortField: { field: "text", direction: "asc" } };
     const selMarriage = document.getElementById("id_parent_marriage");
     let marriageTomSelect = null;
@@ -803,42 +870,64 @@ document.addEventListener("DOMContentLoaded", function () {
     }
     const selFather = document.getElementById("id_assign_father");
     const newFatherInput = document.getElementById("id_new_father_name");
+    const newFatherWrapper = document.getElementById("new_father_wrapper");
     const selMother = document.getElementById("id_assign_mother");
     const newMotherInput = document.getElementById("id_new_mother_name");
+    const newMotherWrapper = document.getElementById("new_mother_wrapper");
     const lineageUnionWrapper = document.getElementById("attach_lineage_union_wrapper");
 
-    function updateLineageUnionVisibility() {
-        if (!lineageUnionWrapper) return;
-        const hasParentInput = Boolean(
-            (selFather && selFather.value) ||
-            (newFatherInput && newFatherInput.value.trim()) ||
-            (selMother && selMother.value) ||
-            (newMotherInput && newMotherInput.value.trim())
-        );
-        if (hasParentInput) {
-            lineageUnionWrapper.classList.add("d-none");
-            if (marriageTomSelect) marriageTomSelect.clear(true);
-            else if (selMarriage) selMarriage.value = "";
-        } else {
-            lineageUnionWrapper.classList.remove("d-none");
+    function updateParentFieldStates() {
+        // Hide/clear 'New Father' if an existing father is selected in dropdown
+        if (newFatherWrapper && selFather) {
+            if (selFather.value) {
+                newFatherWrapper.classList.add("d-none");
+                if (newFatherInput) newFatherInput.value = "";
+            } else {
+                newFatherWrapper.classList.remove("d-none");
+            }
+        }
+        // Hide/clear 'New Mother' if an existing mother is selected in dropdown
+        if (newMotherWrapper && selMother) {
+            if (selMother.value) {
+                newMotherWrapper.classList.add("d-none");
+                if (newMotherInput) newMotherInput.value = "";
+            } else {
+                newMotherWrapper.classList.remove("d-none");
+            }
+        }
+        // Hide Attach to Lineage Union if any parent input is populated
+        if (lineageUnionWrapper) {
+            const hasParentInput = Boolean(
+                (selFather && selFather.value) ||
+                (newFatherInput && newFatherInput.value.trim()) ||
+                (selMother && selMother.value) ||
+                (newMotherInput && newMotherInput.value.trim())
+            );
+            if (hasParentInput) {
+                lineageUnionWrapper.classList.add("d-none");
+                if (marriageTomSelect) marriageTomSelect.clear(true);
+                else if (selMarriage) selMarriage.value = "";
+            } else {
+                lineageUnionWrapper.classList.remove("d-none");
+            }
         }
     }
 
     if (selFather) {
         new TomSelect(selFather, Object.assign({}, tsConfig, {
             placeholder: "Search father...",
-            onChange: updateLineageUnionVisibility
+            onChange: updateParentFieldStates
         }));
     }
     if (selMother) {
         new TomSelect(selMother, Object.assign({}, tsConfig, {
             placeholder: "Search mother...",
-            onChange: updateLineageUnionVisibility
+            onChange: updateParentFieldStates
         }));
     }
-    if (newFatherInput) newFatherInput.addEventListener("input", updateLineageUnionVisibility);
-    if (newMotherInput) newMotherInput.addEventListener("input", updateLineageUnionVisibility);
-    updateLineageUnionVisibility();
+    if (newFatherInput) newFatherInput.addEventListener("input", updateParentFieldStates);
+    if (newMotherInput) newMotherInput.addEventListener("input", updateParentFieldStates);
+    updateParentFieldStates();
 
     const genderSelect = document.getElementById("id_gender");
     const existingSpouseSelect = document.getElementById("id_existing_spouse");
@@ -894,9 +983,7 @@ window.initIndividualPlaces = function() {
         let marker = hasCoords ? new google.maps.Marker({ position: initialCenter, map: map }) : null;
 
         function updateFieldsAndMarker(lat, lng, formattedAddress, placeId, completeOriginalAddress) {
-            // Bug 4 Fix: Populate original_location with the complete supplemented address from dropdown
             if (sec.input) sec.input.value = completeOriginalAddress || formattedAddress || sec.input.value;
-            // Keep Google Place ID, Google Formatted Address, and Lat/Lng unchanged
             if (sec.idInput) sec.idInput.value = placeId || '';
             if (sec.addrInput) sec.addrInput.value = formattedAddress || '';
             if (sec.latInput) sec.latInput.value = lat.toFixed(7);
